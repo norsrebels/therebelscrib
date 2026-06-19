@@ -103,6 +103,15 @@ const GROUP_BG: Record<StatGroupKey, string> = {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function VISStatsTab({ state, tournamentId }: { state: TournamentState; tournamentId: string }) {
+  // Guard against undefined state during initial load
+  if (!state || !Array.isArray(state.poolMatches) || !Array.isArray(state.teams)) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={24} className="animate-spin text-[rgb(var(--muted-fg))]" />
+      </div>
+    )
+  }
+
   const [subTab, setSubTab]                 = useState<SubTab>('live')
   const [selectedMatchId, setSelectedMatchId] = useState<string>('')
   const [selectedSet, setSelectedSet]       = useState(1)
@@ -123,15 +132,15 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
   const prevStatsRef   = useRef<typeof stats>({})
 
   const allMatches = useMemo(() => {
-    const pool = state.poolMatches.map(m => ({
+    const pool = (state.poolMatches ?? []).map(m => ({
       id: m.id,
-      label: `${state.teams.find(t => t.id === m.teamAId)?.name ?? '?'} vs ${state.teams.find(t => t.id === m.teamBId)?.name ?? '?'}`,
+      label: `${(state.teams ?? []).find(t => t.id === m.teamAId)?.name ?? '?'} vs ${(state.teams ?? []).find(t => t.id === m.teamBId)?.name ?? '?'}`,
       teamAId: m.teamAId,
       teamBId: m.teamBId,
     }))
     const playoffs = (state.playoffGames ?? []).filter(g => g.teamAId && g.teamBId).map(g => ({
       id: g.slot,
-      label: `${g.label ?? g.slot}: ${state.teams.find(t => t.id === g.teamAId)?.name ?? '?'} vs ${state.teams.find(t => t.id === g.teamBId)?.name ?? '?'}`,
+      label: `${g.label ?? g.slot}: ${(state.teams ?? []).find(t => t.id === g.teamAId)?.name ?? '?'} vs ${(state.teams ?? []).find(t => t.id === g.teamBId)?.name ?? '?'}`,
       teamAId: g.teamAId!,
       teamBId: g.teamBId!,
     }))
@@ -142,8 +151,8 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
 
   const playersForMatch = useMemo(() => {
     if (!selectedMatch) return []
-    const teamA = state.teams.find(t => t.id === selectedMatch.teamAId)
-    const teamB = state.teams.find(t => t.id === selectedMatch.teamBId)
+    const teamA = (state.teams ?? []).find(t => t.id === selectedMatch.teamAId)
+    const teamB = (state.teams ?? []).find(t => t.id === selectedMatch.teamBId)
     const playersA = (teamA?.players ?? []).map(p => ({ ...p, teamId: selectedMatch.teamAId, teamName: teamA?.name ?? '?' }))
     const playersB = (teamB?.players ?? []).map(p => ({ ...p, teamId: selectedMatch.teamBId, teamName: teamB?.name ?? '?' }))
     return [...playersA, ...playersB]
@@ -494,8 +503,8 @@ function LiveEntryPanel({
 
   const teamAPlayers = players.filter(p => p.teamId === selectedMatch?.teamAId)
   const teamBPlayers = players.filter(p => p.teamId === selectedMatch?.teamBId)
-  const teamAName = state.teams.find(t => t.id === selectedMatch?.teamAId)?.name ?? 'Team A'
-  const teamBName = state.teams.find(t => t.id === selectedMatch?.teamBId)?.name ?? 'Team B'
+  const teamAName = (state.teams ?? []).find(t => t.id === selectedMatch?.teamAId)?.name ?? 'Team A'
+  const teamBName = (state.teams ?? []).find(t => t.id === selectedMatch?.teamBId)?.name ?? 'Team B'
 
   // Filter to assigned team
   const visibleTeamA = myTeam === 'B' ? [] : teamAPlayers
