@@ -1,12 +1,23 @@
+// src/lib/stats/formulas.ts
+// FIVB-compliant statistics — Sprint 2 update
+
 // ─── Raw stat row (mirrors player_stats DB columns) ──────────────────────────
 export type PlayerStatRow = {
+  // Attack
   attackKill: number; attackError: number; attackAttempt: number
+  // Serve
   serveAce: number; serveError: number; serveAttempt: number
+  // Reception
   receptionPerfect: number; receptionGood: number; receptionOk: number
   receptionError: number; receiveAttempt: number
+  // Set — setAttempt is now auto-computed as assist + BHE (FIVB standard)
   setAssist: number; setAttempt: number; setBallHandlingError: number
+  // Block
   blockSolo: number; blockAssist: number; blockError: number; blockRebound: number
+  // Dig — digAttempt auto-computed as dig + digError + freeball
   dig: number; digError: number; digAttempt: number
+  // FIVB addition: freeball digs tracked separately
+  freeballDig: number; freeballError: number
 }
 
 // ─── Formatters ──────────────────────────────────────────────────────────────
@@ -16,36 +27,46 @@ export const fmtEff = (n: number | null) => (n === null ? '—' : n.toFixed(3))
 export const fmtPts = (n: number): string => Number.isInteger(n) ? String(n) : n.toFixed(1)
 
 // ─── Attack ──────────────────────────────────────────────────────────────────
-// Total attempts = kills + errors + neutral in-play attacks (attackAttempt button)
+// FIVB: Total = Kill + Error + In-play (neutral)
 export const attackTotal = (K: number, E: number, Other: number): number => K + E + Other
+
+// FIVB Attack Efficiency = (K - E) / Total
 export const attackEfficiency = (K: number, E: number, Other: number): number | null => {
   const total = attackTotal(K, E, Other)
   return total > 0 ? (K - E) / total : null
 }
+
+// FIVB Kill % = K / Total × 100
 export const killPct = (K: number, E: number, Other: number): number | null => {
   const total = attackTotal(K, E, Other)
   return total > 0 ? (K / total) * 100 : null
 }
 
 // ─── Serve ───────────────────────────────────────────────────────────────────
-// Total attempts = aces + errors + neutral in-play serves (serveAttempt "In" button)
+// FIVB: Total = Ace + Error + In-play
 export const serveTotal = (SA: number, SE: number, In: number): number => SA + SE + In
+
 export const serveAcePct = (SA: number, SE: number, In: number): number | null => {
   const total = serveTotal(SA, SE, In)
   return total > 0 ? (SA / total) * 100 : null
 }
+
 export const serveErrorPct = (SA: number, SE: number, In: number): number | null => {
   const total = serveTotal(SA, SE, In)
   return total > 0 ? (SE / total) * 100 : null
 }
 
 // ─── Reception ───────────────────────────────────────────────────────────────
+// FIVB Reception Efficiency = (3×P + 2×G + 1×OK + 0×E) / Total
+// Scale: 0.00–3.00 (perfect = 3.00)
 export const passEfficiency = (
   perfect: number, good: number, ok: number, error: number,
 ): number | null => {
   const total = perfect + good + ok + error
   return total > 0 ? (3 * perfect + 2 * good + 1 * ok) / total : null
 }
+
+// FIVB Reception Error % = E / Total × 100
 export const receptionErrorPct = (
   error: number, perfect: number, good: number, ok: number,
 ): number | null => {
@@ -53,22 +74,33 @@ export const receptionErrorPct = (
   return total > 0 ? (error / total) * 100 : null
 }
 
+// FIVB: Reception attempt = P + G + OK + E (auto-computed, not manually entered)
+export const receptionTotal = (
+  perfect: number, good: number, ok: number, error: number,
+): number => perfect + good + ok + error
+
 // ─── Set ─────────────────────────────────────────────────────────────────────
-// Total attempts = assists + ball-handling errors (setAttempt is no longer manually tracked)
+// FIVB: Set attempt = Assist + BHE (auto-computed)
 export const setTotal = (assists: number, bhe: number): number => assists + bhe
+
+// FIVB Set Efficiency = Assist / (Assist + BHE) × 100
 export const setEfficiency = (assists: number, bhe: number): number | null => {
   const total = setTotal(assists, bhe)
   return total > 0 ? (assists / total) * 100 : null
 }
 
 // ─── Block ───────────────────────────────────────────────────────────────────
+// FIVB: Block point = Solo (1.0) + Assist (0.5 each)
 export const blockPoints = (BS: number, BA: number): number => BS + BA * 0.5
-/** Alias — VISStatsTab imports this name */
+/** Alias for backwards compatibility */
 export const blockTotal = blockPoints
+
 export const blocksPerSet = (BS: number, BA: number, sets: number): number | null =>
   sets > 0 ? blockPoints(BS, BA) / sets : null
 
 // ─── Dig ─────────────────────────────────────────────────────────────────────
+// FIVB: Dig success rate = Successful Digs / Total Dig Attempts × 100
+// digAttempt is auto-computed = dig + digError (freeball tracked separately)
 export const digSuccessRate = (
   dig: number, digError: number, digAttempt: number,
 ): number | null => {
@@ -76,11 +108,22 @@ export const digSuccessRate = (
   return total > 0 ? (dig / total) * 100 : null
 }
 
+// FIVB Freeball efficiency = freeball digs / (digs + errors) × 100
+export const freeballEfficiency = (
+  freeballDig: number, freeballError: number,
+): number | null => {
+  const total = freeballDig + freeballError
+  return total > 0 ? (freeballDig / total) * 100 : null
+}
+
 // ─── Points ──────────────────────────────────────────────────────────────────
+// FIVB Total Points = Kill + Ace + Block Points
 export const pointsTotal = (K: number, SA: number, BS: number, BA: number): number =>
   K + SA + blockPoints(BS, BA)
+
 export const pointsPerSet = (pts: number, sets: number): number | null =>
   sets > 0 ? pts / sets : null
+
 export const perSet = (count: number, sets: number): number | null =>
   sets > 0 ? count / sets : null
 
@@ -107,6 +150,8 @@ export const aggregateTeamStats = (rows: PlayerStatRow[]) => ({
   dig:                  rows.reduce((s, r) => s + r.dig, 0),
   digError:             rows.reduce((s, r) => s + r.digError, 0),
   digAttempt:           rows.reduce((s, r) => s + r.digAttempt, 0),
+  freeballDig:          rows.reduce((s, r) => s + (r.freeballDig ?? 0), 0),
+  freeballError:        rows.reduce((s, r) => s + (r.freeballError ?? 0), 0),
 })
 
 // ─── Stat fields (for live entry tap buttons) ────────────────────────────────
@@ -117,6 +162,7 @@ export const STAT_FIELDS = [
   'setAssist', 'setAttempt', 'setBallHandlingError',
   'blockSolo', 'blockAssist', 'blockError', 'blockRebound',
   'dig', 'digError', 'digAttempt',
+  'freeballDig', 'freeballError',
 ] as const
 
 export type StatField = (typeof STAT_FIELDS)[number]
