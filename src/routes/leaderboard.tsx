@@ -1,5 +1,5 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useState, useMemo } from 'react'
+import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { useState, useMemo, useCallback } from 'react'
 import { getAllPlayerStats } from '@/server/stats.functions'
 import {
   type PlayerStatRow,
@@ -20,7 +20,9 @@ import {
   fmtPts,
   aggregateTeamStats,
 } from '@/lib/stats/formulas'
-import { BarChart2, X, ChevronDown } from 'lucide-react'
+import { BarChart2, X, ChevronDown, Copy, Check } from 'lucide-react'
+import { LeaderboardSkeleton } from '@/components/Skeletons'
+import { LeaderboardEmptyState } from '@/components/EmptyState'
 
 export const Route = createFileRoute('/leaderboard')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -38,6 +40,7 @@ export const Route = createFileRoute('/leaderboard')({
       return { stats: [], players: [], schedules: [] }
     }
   },
+  pendingComponent: LeaderboardSkeleton,
   component: PlayerStatsPage,
 })
 
@@ -81,6 +84,17 @@ function PlayerStatsPage() {
   const navigate = Route.useNavigate()
   const [selectedRanking, setSelectedRanking] = useState<RankingKey>('totalPts')
   const [selectedPlayer, setSelectedPlayer] = useState<number | null>(null)
+  const [copiedId, setCopiedId] = useState<number | null>(null)
+
+  const handleCopy = useCallback((e: React.MouseEvent, p: any, value: string) => {
+    e.stopPropagation()
+    const label = RANKINGS.find(r => r.key === selectedRanking)?.label ?? selectedRanking
+    const text = `${p.name} — ${label}: ${value}`
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(p.playerId)
+      setTimeout(() => setCopiedId(null), 2000)
+    })
+  }, [selectedRanking])
 
   const selectedScheduleId = search.schedule ?? ''
   const selectedScheduleName = schedules.find((s: any) => s.id === selectedScheduleId)?.name ?? ''
@@ -248,7 +262,8 @@ function PlayerStatsPage() {
         </div>
 
         <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-2xl overflow-hidden">
-          <div className="px-5 py-3 border-b border-[rgb(var(--border))] flex items-center justify-between">
+          {/* Sticky header */}
+          <div className="sticky top-0 z-10 px-5 py-3 border-b border-[rgb(var(--border))] flex items-center justify-between bg-[rgb(var(--surface))]">
             <div className="flex items-center gap-2">
               <BarChart2 className="text-blue-400" size={15} />
               <span className="font-semibold text-sm">{RANKINGS.find(r => r.key === selectedRanking)?.label}</span>
@@ -257,24 +272,38 @@ function PlayerStatsPage() {
           </div>
 
           {ranked.length === 0 ? (
-            <div className="text-center py-16 text-[rgb(var(--muted-fg))] text-sm">No data yet — or no players meet the minimum threshold.</div>
+            <LeaderboardEmptyState />
           ) : (
             <div>
-              {ranked.map((p, i) => (
-                <button key={p.playerId} onClick={() => setSelectedPlayer(p.playerId)}
-                  className={`w-full flex items-center gap-4 px-5 py-3.5 border-b border-[rgb(var(--border-soft))] hover:bg-[rgb(var(--surface-hover))] transition-colors text-left ${i % 2 !== 0 ? 'bg-[rgb(var(--surface-hover))]' : ''}`}>
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${i === 0 ? 'bg-yellow-400/20 text-yellow-400 border border-yellow-400/30' : i === 1 ? 'bg-gray-400/20 text-gray-300 border border-gray-400/30' : i === 2 ? 'bg-amber-700/20 text-amber-600 border border-amber-700/30' : 'bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))]'}`}>{i + 1}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{p.name}</span>
-                      <span className="text-xs text-[rgb(var(--muted-fg))] font-mono">#{p.jersey ?? '?'}</span>
-                      {p.position && <span className="text-[10px] px-1.5 py-0.5 bg-[rgb(var(--surface-hover))] rounded text-[rgb(var(--muted-fg))]">{p.position}</span>}
+              {ranked.map((p, i) => {
+                const value = formatValue(p)
+                const copied = copiedId === p.playerId
+                return (
+                  <button key={p.playerId} onClick={() => setSelectedPlayer(p.playerId)}
+                    className={`w-full flex items-center gap-4 px-5 py-3.5 border-b border-[rgb(var(--border-soft))] hover:bg-[rgb(var(--surface-hover))] transition-colors text-left group ${i % 2 !== 0 ? 'bg-[rgb(var(--surface-hover))]' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${i === 0 ? 'bg-yellow-400/20 text-yellow-400 border border-yellow-400/30' : i === 1 ? 'bg-gray-400/20 text-gray-300 border border-gray-400/30' : i === 2 ? 'bg-amber-700/20 text-amber-600 border border-amber-700/30' : 'bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))]'}`}>{i + 1}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{p.name}</span>
+                        <span className="text-xs text-[rgb(var(--muted-fg))] font-mono">#{p.jersey ?? '?'}</span>
+                        {p.position && <span className="text-[10px] px-1.5 py-0.5 bg-[rgb(var(--surface-hover))] rounded text-[rgb(var(--muted-fg))]">{p.position}</span>}
+                      </div>
+                      <div className="text-[10px] text-[rgb(var(--muted-fg))] mt-0.5">{p.totalSets} set{p.totalSets !== 1 ? 's' : ''} played</div>
                     </div>
-                    <div className="text-[10px] text-[rgb(var(--muted-fg))] mt-0.5">{p.totalSets} set{p.totalSets !== 1 ? 's' : ''} played</div>
-                  </div>
-                  <div className="text-base font-bold tabular-nums text-blue-400">{formatValue(p)}</div>
-                </button>
-              ))}
+                    <div className="flex items-center gap-2">
+                      <div className="text-base font-bold tabular-nums text-blue-400">{value}</div>
+                      {/* Copy button — visible on hover or after copy */}
+                      <button
+                        onClick={(e) => handleCopy(e, p, value)}
+                        title="Copy to clipboard"
+                        className={`p-1.5 rounded-lg transition-all flex-shrink-0 ${copied ? 'text-green-400 bg-green-400/10' : 'text-[rgb(var(--muted-fg))] opacity-0 group-hover:opacity-100 hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))]'}`}
+                      >
+                        {copied ? <Check size={13} /> : <Copy size={13} />}
+                      </button>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
