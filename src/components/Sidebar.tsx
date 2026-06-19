@@ -11,6 +11,7 @@ import {
   X,
   Sun,
   Moon,
+  Monitor,
   LogIn,
   LogOut,
   ClipboardList,
@@ -43,12 +44,27 @@ export function Sidebar() {
   const location = useLocation()
   const { isAdmin, user } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system')
   const [collapsed, setCollapsed] = useState(false)
 
+  function applyTheme(t: 'light' | 'dark' | 'system') {
+    const resolved = t === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : t
+    document.documentElement.setAttribute('data-theme', resolved)
+  }
+
   useEffect(() => {
-    const saved = localStorage.getItem('tr_theme') || 'dark'
-    setTheme(saved as 'light' | 'dark')
+    const saved = (localStorage.getItem('tr_theme') || 'system') as 'light' | 'dark' | 'system'
+    setTheme(saved)
+    applyTheme(saved)
+    // Also listen for OS-level changes when in system mode
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = () => {
+      if ((localStorage.getItem('tr_theme') || 'system') === 'system') applyTheme('system')
+    }
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
   }, [])
 
   useEffect(() => {
@@ -80,12 +96,22 @@ export function Sidebar() {
     }
   }, [mobileOpen])
 
-  const toggleTheme = () => {
-    const next = theme === 'dark' ? 'light' : 'dark'
+  // Cycle: light → dark → system → light
+  const cycleTheme = () => {
+    const order: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system']
+    const next = order[(order.indexOf(theme) + 1) % order.length]
     setTheme(next)
-    document.documentElement.setAttribute('data-theme', next)
     localStorage.setItem('tr_theme', next)
+    applyTheme(next)
   }
+
+  const themeIcon = theme === 'dark' ? <Moon size={18} className="shrink-0" />
+    : theme === 'light' ? <Sun size={18} className="shrink-0" />
+    : <Monitor size={18} className="shrink-0" />
+
+  const themeLabel = theme === 'dark' ? 'Dark Mode'
+    : theme === 'light' ? 'Light Mode'
+    : 'System Theme'
 
   const handleSignOut = async () => {
     try {
@@ -160,15 +186,15 @@ export function Sidebar() {
 
         <div className="p-3 border-t border-[rgb(var(--border-soft))] space-y-1">
           <button
-            onClick={toggleTheme}
-            title={collapsed ? (theme === 'dark' ? 'Light Mode' : 'Dark Mode') : undefined}
+            onClick={cycleTheme}
+            title={collapsed ? themeLabel : undefined}
             className={cn(
               'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors',
               collapsed && 'justify-center',
             )}
           >
-            {theme === 'dark' ? <Sun size={18} className="shrink-0" /> : <Moon size={18} className="shrink-0" />}
-            {!collapsed && (theme === 'dark' ? 'Light Mode' : 'Dark Mode')}
+            {themeIcon}
+            {!collapsed && themeLabel}
           </button>
           {user ? (
             <button
@@ -293,7 +319,7 @@ export function Sidebar() {
 
             <div className="p-3 border-t border-[rgb(var(--border-soft))] space-y-1">
               <button
-                onClick={toggleTheme}
+                onClick={cycleTheme}
                 className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors"
               >
                 {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
