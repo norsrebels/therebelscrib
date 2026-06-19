@@ -53,7 +53,7 @@ import {
   Upload,
   BarChart2,
 } from "lucide-react";
-import { Save, Check, AlertTriangle, Copy } from "lucide-react";
+import { Save, Check, AlertTriangle, Copy, Globe, Radio, ChevronRight, Share2, Trophy } from "lucide-react";
 import { uploadPlayerImage } from "../server/player.functions";
 import { VISStatsTab } from "./VISStatsTab";
 
@@ -521,6 +521,35 @@ function TeamsTab({
         </div>
       </div>
 
+      {/* Payment Status Summary */}
+      {state.teams.length > 0 && (() => {
+        const allPlayers = state.teams.flatMap(t => t.players ?? []);
+        const paid = allPlayers.filter(p => p.paymentStatus === 'Paid').length;
+        const partial = allPlayers.filter(p => p.paymentStatus === 'Partial').length;
+        const pending = allPlayers.filter(p => p.paymentStatus === 'Pending').length;
+        const total = allPlayers.length;
+        if (total === 0) return null;
+        return (
+          <div className="glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))]">Payment Status</h3>
+              <span className="text-xs text-[rgb(var(--muted-fg))]">{total} players total</span>
+            </div>
+            {/* Progress bar */}
+            <div className="h-2 rounded-full bg-[rgb(var(--surface-hover))] overflow-hidden flex mb-3">
+              <div className="bg-green-500 transition-all" style={{ width: `${(paid/total)*100}%` }} />
+              <div className="bg-amber-400 transition-all" style={{ width: `${(partial/total)*100}%` }} />
+              <div className="bg-red-400/50 transition-all" style={{ width: `${(pending/total)*100}%` }} />
+            </div>
+            <div className="flex gap-4 text-xs">
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" /><span className="font-bold text-green-400">{paid}</span> Paid</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /><span className="font-bold text-amber-400">{partial}</span> Partial</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-400/70 inline-block" /><span className="font-bold text-red-400">{pending}</span> Pending</span>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* CSV Import */}
       {state.teams.length > 0 && (
         <div className="glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-5">
@@ -891,6 +920,94 @@ function PoolMatchRow({
   );
 }
 
+// ─── Bracket Visual ────────────────────────────────────────────────────────────
+function BracketVisual({ resolvedPlayoffs, teams, maxScore, leadScore }: {
+  resolvedPlayoffs: any[];
+  teams: any[];
+  maxScore: number | null;
+  leadScore: number | null;
+}) {
+  // Group games by phase for column layout
+  const phaseOrder = ['quarterfinal', 'semifinal', 'third', 'championship'];
+  const grouped: Record<string, any[]> = {};
+  for (const g of resolvedPlayoffs) {
+    const phase = g.phase ?? 'other';
+    if (!grouped[phase]) grouped[phase] = [];
+    grouped[phase].push(g);
+  }
+  const phases = phaseOrder.filter(p => grouped[p]?.length);
+  if (phases.length === 0) return null;
+
+  const getTeamName = (id: string | null | undefined, label: string) =>
+    id ? (teams.find((t: any) => t.id === id)?.name ?? label) : label;
+
+  const isComplete = (g: any) =>
+    g.scoreA !== null && g.scoreB !== null &&
+    (maxScore ? (g.scoreA >= maxScore || g.scoreB >= maxScore) : g.scoreA !== g.scoreB);
+
+  const getWinner = (g: any) => {
+    if (!isComplete(g)) return null;
+    return g.scoreA > g.scoreB
+      ? getTeamName(g.teamAId, g.teamALabel)
+      : getTeamName(g.teamBId, g.teamBLabel);
+  };
+
+  const phaseLabels: Record<string, string> = {
+    quarterfinal: 'QF', semifinal: 'SF', third: '3rd', championship: 'Final'
+  };
+
+  return (
+    <div className="glass border border-[rgb(var(--border-soft))] rounded-xl p-4 overflow-x-auto">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-[rgb(var(--muted-fg))] mb-3">Bracket</p>
+      <div className="flex items-start gap-0 min-w-max">
+        {phases.map((phase, phaseIdx) => (
+          <div key={phase} className="flex items-center">
+            {/* Phase column */}
+            <div className="flex flex-col gap-3 min-w-[140px] max-w-[160px]">
+              <p className="text-[10px] font-bold text-purple-400 uppercase tracking-wider text-center mb-1">
+                {phaseLabels[phase] ?? phase}
+              </p>
+              {(grouped[phase] ?? []).map((g: any, i: number) => {
+                const nameA = getTeamName(g.teamAId, g.teamALabel ?? 'TBD');
+                const nameB = getTeamName(g.teamBId, g.teamBLabel ?? 'TBD');
+                const done = isComplete(g);
+                const winner = getWinner(g);
+                const aWon = done && winner === nameA;
+                const bWon = done && winner === nameB;
+                return (
+                  <div key={g.slot} className={`rounded-xl border overflow-hidden text-xs ${done ? 'border-[rgb(var(--border))]' : 'border-dashed border-[rgb(var(--border-soft))]'}`}>
+                    {/* Team A */}
+                    <div className={`flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-[rgb(var(--border-soft))] ${aWon ? 'bg-green-500/10' : ''}`}>
+                      <span className={`truncate font-medium ${aWon ? 'text-green-400' : 'text-[rgb(var(--fg))]'} ${nameA === 'TBD' ? 'text-[rgb(var(--muted-fg))] italic' : ''}`}>
+                        {nameA}
+                      </span>
+                      {g.scoreA !== null && <span className={`font-bold tabular-nums flex-shrink-0 ${aWon ? 'text-green-400' : 'text-[rgb(var(--muted-fg))]'}`}>{g.scoreA}</span>}
+                    </div>
+                    {/* Team B */}
+                    <div className={`flex items-center justify-between gap-2 px-2.5 py-1.5 ${bWon ? 'bg-green-500/10' : ''}`}>
+                      <span className={`truncate font-medium ${bWon ? 'text-green-400' : 'text-[rgb(var(--fg))]'} ${nameB === 'TBD' ? 'text-[rgb(var(--muted-fg))] italic' : ''}`}>
+                        {nameB}
+                      </span>
+                      {g.scoreB !== null && <span className={`font-bold tabular-nums flex-shrink-0 ${bWon ? 'text-green-400' : 'text-[rgb(var(--muted-fg))]'}`}>{g.scoreB}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Connector line between phases */}
+            {phaseIdx < phases.length - 1 && (
+              <div className="flex items-center self-center px-1">
+                <div className="w-4 h-px bg-[rgb(var(--border))]" />
+                <div className="text-[rgb(var(--border))]">›</div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MatchesTab({
   state,
   setState,
@@ -1156,7 +1273,6 @@ function MatchesTab({
               <span className="px-2 py-0.5 bg-purple-500/10 text-purple-500 text-[10px] font-bold rounded-full">
                 {isDE ? "Double Elim" : "Playoffs"}
               </span>
-              {/* Generate DE — shown when a DE bracket exists for this team count and DE is not yet active */}
               {!isDE && deBracketExists && (
                 <button
                   onClick={() => setShowDEModal(true)}
@@ -1165,7 +1281,6 @@ function MatchesTab({
                   <Copy size={10} /> Generate DE
                 </button>
               )}
-              {/* Remove DE — shown when DE is active and no playoff scores exist yet */}
               {isDE && !playoffHasScores && (
                 <button
                   onClick={() => setShowRemoveDEModal(true)}
@@ -1176,6 +1291,15 @@ function MatchesTab({
               )}
             </div>
           </div>
+
+          {/* Visual bracket tree */}
+          <BracketVisual
+            resolvedPlayoffs={resolvedPlayoffs}
+            teams={state.teams}
+            maxScore={state.settings.maxScore}
+            leadScore={state.settings.leadScore}
+          />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {resolvedPlayoffs.map((g) => {
               const tA = g.teamAId
@@ -1353,75 +1477,85 @@ function MatchesTab({
 }
 
 function LeaderboardTab({ state }: { state: TournamentState }) {
-  const renderTable = (standings: TeamStanding[], poolLabel: string) => (
-    <div className="mb-8">
-      <h3 className="text-xs font-bold tracking-tight  text-[rgb(var(--fg))] mb-4">
-        {poolLabel}
-      </h3>
-      <div className="overflow-x-auto glass rounded-xl border border-[rgb(var(--border-soft))] shadow-sm">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[rgb(var(--border))] bg-[rgb(var(--bg))]">
-              {["#", "TEAM", "W", "L", "GP", "PF", "PA", "QUOTIENT"].map(
-                (h) => (
-                  <th
-                    key={h}
-                    className="text-left py-3 px-4 text-xs font-bold tracking-tight text-[rgb(var(--muted-fg))] last:text-right"
-                  >
-                    {h}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {standings.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="text-center py-6 text-[rgb(var(--muted-fg))] italic"
-                >
-                  No results yet
-                </td>
+  const renderTable = (standings: TeamStanding[], poolLabel: string) => {
+    const h2hMap: Record<string, Record<string, string>> = {};
+    for (const s of standings) {
+      h2hMap[s.team.id] = {};
+      for (const opp of standings) {
+        if (opp.team.id === s.team.id) continue;
+        const match = state.poolMatches.find(
+          m => (m.teamAId === s.team.id && m.teamBId === opp.team.id) ||
+               (m.teamAId === opp.team.id && m.teamBId === s.team.id)
+        );
+        if (match && isGameComplete(match, state.settings.maxScore, state.settings.leadScore)) {
+          const isA = match.teamAId === s.team.id;
+          const myScore = isA ? match.scoreA! : match.scoreB!;
+          const oppScore = isA ? match.scoreB! : match.scoreA!;
+          h2hMap[s.team.id][opp.team.id] = myScore > oppScore ? 'W' : 'L';
+        }
+      }
+    }
+    return (
+      <div className="mb-8">
+        <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))] mb-4">{poolLabel}</h3>
+        <div className="overflow-x-auto glass rounded-xl border border-[rgb(var(--border-soft))] shadow-sm">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[rgb(var(--border))] bg-[rgb(var(--bg))]">
+                {["#", "TEAM", "W", "L", "GP", "PF", "PA", "+/-", "QUOT", "H2H"].map((h) => (
+                  <th key={h} className="text-left py-3 px-4 text-xs font-bold tracking-tight text-[rgb(var(--muted-fg))] last:text-right whitespace-nowrap">{h}</th>
+                ))}
               </tr>
-            ) : (
-              standings.map((s) => (
-                <tr
-                  key={s.team.id}
-                  className="border-b border-[rgb(var(--border-soft))] last:border-0 hover:bg-[rgb(var(--bg))]"
-                >
-                  <td className="py-3 px-4 text-[rgb(var(--muted-fg))] font-mono text-xs">
-                    {s.rank}
-                  </td>
-                  <td className="py-3 px-4 font-semibold text-[rgb(var(--fg))]">
-                    {s.team.name}
-                  </td>
-                  <td className="py-3 px-4 font-bold text-[rgb(var(--fg))]">
-                    {s.wins}
-                  </td>
-                  <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">
-                    {s.losses}
-                  </td>
-                  <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">
-                    {s.gamesPlayed}
-                  </td>
-                  <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">
-                    {s.pointsFor}
-                  </td>
-                  <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">
-                    {s.pointsAgainst}
-                  </td>
-                  <td className="py-3 px-4 text-right font-mono text-[rgb(var(--fg))]">
-                    {s.quotient.toFixed(3)}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {standings.length === 0 ? (
+                <tr><td colSpan={10} className="text-center py-6 text-[rgb(var(--muted-fg))] italic">No results yet</td></tr>
+              ) : (
+                standings.map((s) => {
+                  const diff = s.pointsFor - s.pointsAgainst;
+                  const h2hResults = h2hMap[s.team.id] ?? {};
+                  return (
+                    <tr key={s.team.id} className="border-b border-[rgb(var(--border-soft))] last:border-0 hover:bg-[rgb(var(--bg))]">
+                      <td className="py-3 px-4 text-[rgb(var(--muted-fg))] font-mono text-xs">{s.rank}</td>
+                      <td className="py-3 px-4 font-semibold text-[rgb(var(--fg))]">{s.team.name}</td>
+                      <td className="py-3 px-4 font-bold text-green-400">{s.wins}</td>
+                      <td className="py-3 px-4 text-red-400">{s.losses}</td>
+                      <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">{s.gamesPlayed}</td>
+                      <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">{s.pointsFor}</td>
+                      <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">{s.pointsAgainst}</td>
+                      <td className={`py-3 px-4 font-bold font-mono ${diff > 0 ? 'text-green-400' : diff < 0 ? 'text-red-400' : 'text-[rgb(var(--muted-fg))]'}`}>
+                        {diff > 0 ? '+' : ''}{diff}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-[rgb(var(--fg))]">{s.quotient.toFixed(3)}</td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1 flex-wrap">
+                          {Object.entries(h2hResults).map(([oppId, result]) => {
+                            const opp = standings.find(x => x.team.id === oppId);
+                            return (
+                              <span key={oppId} title={`vs ${opp?.team.name ?? ''}: ${result}`}
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${result === 'W' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                {result}
+                              </span>
+                            );
+                          })}
+                          {Object.keys(h2hResults).length === 0 && <span className="text-[10px] text-[rgb(var(--muted-fg))]">—</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-2 flex gap-3">
+          <span><strong>+/-</strong> Point differential</span>
+          <span><strong>H2H</strong> Head-to-head vs tied opponents</span>
+          <span><strong>QUOT</strong> PF÷PA (FIVB tiebreaker)</span>
+        </p>
       </div>
-    </div>
-  );
+    );
+  };
 
   const sA = computeStandings(
     state.teams,
@@ -1608,22 +1742,20 @@ function LiveView({
 }) {
   const [filter, setFilter] = useState<LiveFilter>("all");
   const [now, setNow] = useState(new Date());
+  const [followTeam, setFollowTeam] = useState<string | null>(null);
+  const [flashMap, setFlashMap] = useState<Record<string, boolean>>({});
+  const [shareToast, setShareToast] = useState(false);
+  const [completedOpen, setCompletedOpen] = useState(false);
+  const prevScoresRef = useRef<Record<string, { a: number | null; b: number | null }>>({});
+
   const standingsA = computeStandings(
-    state.teams,
-    state.poolMatches,
-    "A",
-    state.settings.maxScore,
-    state.settings.leadScore,
+    state.teams, state.poolMatches, "A", state.settings.maxScore, state.settings.leadScore,
   );
   const standingsB = computeStandings(
-    state.teams,
-    state.poolMatches,
-    "B",
-    state.settings.maxScore,
-    state.settings.leadScore,
+    state.teams, state.poolMatches, "B", state.settings.maxScore, state.settings.leadScore,
   );
 
-  // Tick every second to update the "ago" timer
+  // Tick every second for "ago" timer
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
@@ -1641,67 +1773,60 @@ function LiveView({
         const teamB = state.teams.find((team) => team.id === match.teamBId);
         const hasAnyScore = match.scoreA !== null || match.scoreB !== null;
         const isComplete = isGameComplete(match, state.settings.maxScore, state.settings.leadScore);
-
         return {
           id: match.id,
-          type: "pool",
+          type: "pool" as const,
           pool: match.pool,
           order: match.gameNum,
           title: `Pool ${match.pool} · Game ${match.gameNum}`,
-          subtitle: `Round ${match.round}${match.court ? ` · Court ${match.court}` : ""} · Simultaneous Slot ${match.gameNum}`,
+          subtitle: `Round ${match.round}${match.court ? ` · Court ${match.court}` : ""} · Slot ${match.gameNum}`,
           teamAName: teamA?.name ?? "TBD",
           teamBName: teamB?.name ?? "TBD",
+          teamAId: match.teamAId,
+          teamBId: match.teamBId,
           scoreA: match.scoreA,
           scoreB: match.scoreB,
+          court: match.court ?? null,
           isComplete,
           isOngoing: hasAnyScore && !isComplete,
-          status: "pending",
+          status: "pending" as LiveGameStatus,
         };
       });
 
     const playoffTemplate = buildBracketTemplate(
-      state.teams.filter((team) => team.pool === "A").length,
-      state.teams.filter((team) => team.pool === "B").length,
+      state.teams.filter((t) => t.pool === "A").length,
+      state.teams.filter((t) => t.pool === "B").length,
       state.settings.useDEBracket ? "de" : "auto",
       state.settings.deBye,
     );
     const playoffGames = resolvePlayoffGames(
-      playoffTemplate,
-      state.teams,
-      state.poolMatches,
-      state.playoffGames,
-      state.settings.maxScore,
-      state.settings.leadScore,
+      playoffTemplate, state.teams, state.poolMatches, state.playoffGames,
+      state.settings.maxScore, state.settings.leadScore,
     );
     const playoffCards: LiveGameCard[] = playoffGames.map((game, index) => {
-      const teamA = game.teamAId
-        ? state.teams.find((team) => team.id === game.teamAId)
-        : null;
-      const teamB = game.teamBId
-        ? state.teams.find((team) => team.id === game.teamBId)
-        : null;
+      const teamA = game.teamAId ? state.teams.find((t) => t.id === game.teamAId) : null;
+      const teamB = game.teamBId ? state.teams.find((t) => t.id === game.teamBId) : null;
       const hasAnyScore = game.scoreA !== null || game.scoreB !== null;
       const isComplete = isGameComplete(game, state.settings.maxScore, state.settings.leadScore);
-
       return {
         id: game.slot,
-        type: "playoff",
+        type: "playoff" as const,
         order: index + 1,
         title: game.slot,
         subtitle: `${PHASE_LABELS[game.phase]}${game.court ? ` • Court ${game.court}` : ""}`,
         teamAName: teamA?.name ?? game.teamALabel,
         teamBName: teamB?.name ?? game.teamBLabel,
+        teamAId: game.teamAId ?? null,
+        teamBId: game.teamBId ?? null,
         scoreA: game.scoreA,
         scoreB: game.scoreB,
+        court: game.court ?? null,
         isComplete,
         isOngoing: hasAnyScore && !isComplete,
-        status: "pending",
+        status: "pending" as LiveGameStatus,
       };
     });
 
-    // Determine status per simultaneous slot for pool games. Pool A's gameNum N
-    // and Pool B's gameNum N share a slot — they play at the same time, so they
-    // share status. A slot is "ongoing" if any game in it has started.
     const slotMap = new Map<number, LiveGameCard[]>();
     for (const card of poolCards) {
       const arr = slotMap.get(card.order) ?? [];
@@ -1709,7 +1834,6 @@ function LiveView({
       slotMap.set(card.order, arr);
     }
     const slotKeys = [...slotMap.keys()].sort((a, b) => a - b);
-
     let foundNext = false;
     const poolWithStatus: LiveGameCard[] = [];
     for (const slotNum of slotKeys) {
@@ -1719,29 +1843,65 @@ function LiveView({
       let slotStatus: LiveGameStatus;
       if (allDone) slotStatus = "done";
       else if (anyStarted) slotStatus = "ongoing";
-      else if (!foundNext) {
-        slotStatus = "next";
-        foundNext = true;
-      } else slotStatus = "pending";
+      else if (!foundNext) { slotStatus = "next"; foundNext = true; }
+      else slotStatus = "pending";
       for (const c of cards) poolWithStatus.push({ ...c, status: slotStatus });
     }
-
     const playoffWithStatus: LiveGameCard[] = playoffCards.map((c) => {
       let status: LiveGameStatus = "pending";
       if (c.isComplete) status = "done";
       else if (c.isOngoing) status = "ongoing";
-      else if (!foundNext) {
-        status = "next";
-        foundNext = true;
-      }
+      else if (!foundNext) { status = "next"; foundNext = true; }
       return { ...c, status };
     });
-
     return [...poolWithStatus, ...playoffWithStatus];
   }, [state]);
 
-  const ongoingCards = liveCards.filter((card) => card.status === "ongoing");
-  const nextCards = liveCards.filter((card) => card.status === "next");
+  // Score change detection — flash animation
+  useEffect(() => {
+    const newFlash: Record<string, boolean> = {};
+    for (const card of liveCards) {
+      const prev = prevScoresRef.current[card.id];
+      if (prev) {
+        if (prev.a !== card.scoreA) newFlash[`${card.id}-A`] = true;
+        if (prev.b !== card.scoreB) newFlash[`${card.id}-B`] = true;
+      }
+      prevScoresRef.current[card.id] = { a: card.scoreA, b: card.scoreB };
+    }
+    if (Object.keys(newFlash).length > 0) {
+      setFlashMap(newFlash);
+      setTimeout(() => setFlashMap({}), 700);
+    }
+  }, [liveCards]);
+
+  // Browser tab pulse when live games ongoing
+  useEffect(() => {
+    const name = state.settings.scheduleName || "The Rebels Crib";
+    const ongoingCards = liveCards.filter((c) => c.status === "ongoing");
+    if (ongoingCards.length === 0) {
+      document.title = name;
+      return;
+    }
+    const firstOngoing = ongoingCards[0];
+    const liveTitle = `● LIVE — ${firstOngoing.teamAName} vs ${firstOngoing.teamBName}`;
+    let toggle = false;
+    const interval = setInterval(() => {
+      document.title = toggle ? liveTitle : name;
+      toggle = !toggle;
+    }, 800);
+    return () => { clearInterval(interval); document.title = name; };
+  }, [liveCards, state.settings.scheduleName]);
+
+  const ongoingCards = liveCards.filter((c) => c.status === "ongoing");
+  const nextCards = liveCards.filter((c) => c.status === "next");
+  const completedCards = liveCards.filter((c) => c.status === "done");
+  const activeCards = liveCards.filter((c) => c.status !== "done");
+
+  const totalMatches = liveCards.length;
+  const playedMatches = completedCards.length + ongoingCards.length;
+
+  // Team follow filter
+  const allTeamNames = [...new Set(liveCards.flatMap((c) => [c.teamAName, c.teamBName]).filter((n) => n !== "TBD"))].sort();
 
   const groupCardsBySlot = (cards: LiveGameCard[]) => {
     const poolGroups = new Map<number, LiveGameCard[]>();
@@ -1755,21 +1915,10 @@ function LiveView({
         playoffSolo.push(c);
       }
     }
-    const groups: {
-      key: string;
-      label: string | null;
-      cards: LiveGameCard[];
-    }[] = [];
-    for (const [slotNum, slotCards] of [...poolGroups.entries()].sort(
-      (a, b) => a[0] - b[0],
-    )) {
-      const sorted = slotCards
-        .slice()
-        .sort((a, b) => (a.pool ?? "").localeCompare(b.pool ?? ""));
-      const label =
-        slotCards.length > 1
-          ? `Slot ${slotNum} · Simultaneous`
-          : `Slot ${slotNum}`;
+    const groups: { key: string; label: string | null; cards: LiveGameCard[] }[] = [];
+    for (const [slotNum, slotCards] of [...poolGroups.entries()].sort((a, b) => a[0] - b[0])) {
+      const sorted = slotCards.slice().sort((a, b) => (a.pool ?? "").localeCompare(b.pool ?? ""));
+      const label = slotCards.length > 1 ? `Slot ${slotNum} · Simultaneous` : `Slot ${slotNum}`;
       groups.push({ key: `slot-${slotNum}`, label, cards: sorted });
     }
     for (const c of playoffSolo) {
@@ -1778,324 +1927,401 @@ function LiveView({
     return groups;
   };
 
-  const filteredCards = useMemo(() => {
-    if (filter === "ongoing") return []; // already rendered in highlight section
-    if (filter === "next") return nextCards;
-    return liveCards.filter((card) => card.status !== "ongoing");
-  }, [filter, liveCards, nextCards]);
+  const applyFollowFilter = (cards: LiveGameCard[]) => {
+    if (!followTeam) return cards;
+    return cards.filter((c) => c.teamAName === followTeam || c.teamBName === followTeam);
+  };
+
+  const filteredActiveCards = useMemo(() => {
+    let base = activeCards;
+    if (filter === "ongoing") base = ongoingCards;
+    else if (filter === "next") base = nextCards;
+    return applyFollowFilter(base);
+  }, [filter, activeCards, ongoingCards, nextCards, followTeam]);
+
+  const handleShare = async () => {
+    const url = window.location.href;
+    const title = state.settings.scheduleName || "Live Tournament";
+    if (navigator.share) {
+      try { await navigator.share({ title, url }); return; } catch { /* fall through */ }
+    }
+    await navigator.clipboard.writeText(url);
+    setShareToast(true);
+    setTimeout(() => setShareToast(false), 2000);
+  };
+
+  // H2H helper for live standings
+  const computeH2H = (standings: typeof standingsA) => {
+    const map: Record<string, Record<string, string>> = {};
+    for (const s of standings) {
+      map[s.team.id] = {};
+      for (const opp of standings) {
+        if (opp.team.id === s.team.id) continue;
+        const match = state.poolMatches.find(
+          m => (m.teamAId === s.team.id && m.teamBId === opp.team.id) ||
+               (m.teamAId === opp.team.id && m.teamBId === s.team.id)
+        );
+        if (match && isGameComplete(match, state.settings.maxScore, state.settings.leadScore)) {
+          const isA = match.teamAId === s.team.id;
+          const my = isA ? match.scoreA! : match.scoreB!;
+          const their = isA ? match.scoreB! : match.scoreA!;
+          map[s.team.id][opp.team.id] = my > their ? "W" : "L";
+        }
+      }
+    }
+    return map;
+  };
+
+  const renderLiveStandings = (standings: typeof standingsA, label: string) => {
+    const h2h = computeH2H(standings);
+    return (
+      <div className="glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-4">
+        <h3 className="text-xs font-bold tracking-tight mb-3">{label}</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[rgb(var(--muted-fg))]">
+                {["#", "Team", "W", "L", "PF", "PA", "+/-", "Quot", "H2H"].map((h) => (
+                  <th key={h} className="py-2 text-left font-bold last:text-right whitespace-nowrap px-1">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {standings.map((team) => {
+                const diff = team.pointsFor - team.pointsAgainst;
+                const h2hResults = h2h[team.team.id] ?? {};
+                return (
+                  <tr key={team.team.id} className="border-t border-[rgb(var(--border-soft))]">
+                    <td className="py-2 font-mono text-[rgb(var(--muted-fg))] px-1">{team.rank}</td>
+                    <td className="py-2 font-semibold px-1">{team.team.name}</td>
+                    <td className="py-2 text-green-400 font-bold px-1">{team.wins}</td>
+                    <td className="py-2 text-red-400 px-1">{team.losses}</td>
+                    <td className="py-2 px-1">{team.pointsFor}</td>
+                    <td className="py-2 px-1">{team.pointsAgainst}</td>
+                    <td className={`py-2 font-bold font-mono px-1 ${diff > 0 ? "text-green-400" : diff < 0 ? "text-red-400" : "text-[rgb(var(--muted-fg))]"}`}>
+                      {diff > 0 ? "+" : ""}{diff}
+                    </td>
+                    <td className="py-2 text-right font-mono px-1">{team.quotient.toFixed(3)}</td>
+                    <td className="py-2 text-right px-1">
+                      <div className="flex items-center justify-end gap-0.5 flex-wrap">
+                        {Object.entries(h2hResults).map(([oppId, result]) => (
+                          <span key={oppId}
+                            className={`text-[9px] font-bold px-1 py-0.5 rounded ${result === "W" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                            {result}
+                          </span>
+                        ))}
+                        {Object.keys(h2hResults).length === 0 && <span className="text-[rgb(var(--muted-fg))]">—</span>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // Empty state — no matches at all
+  if (liveCards.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center space-y-4">
+        <img src="/logo.png" alt="Rebels" className="w-16 h-16 rounded-2xl opacity-60" />
+        <div>
+          <p className="text-lg font-bold">Tournament hasn't started yet</p>
+          {state.settings.scheduleName && (
+            <p className="text-sm text-[rgb(var(--muted-fg))] mt-1">{state.settings.scheduleName}</p>
+          )}
+          {(state.settings.date || state.settings.startTime) && (
+            <p className="text-sm text-[rgb(var(--muted-fg))]">
+              {[state.settings.date, state.settings.startTime].filter(Boolean).join(" · ")}
+            </p>
+          )}
+        </div>
+        <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm animate-pulse">
+          <Radio size={14} /> Waiting for scores...
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
+      {/* Header card */}
       <div className="glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-4 sm:p-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight ">
-              Live Match Center
-            </h2>
-            <p className="text-xs text-[rgb(var(--muted-fg))] tracking-normal mt-1">
-              Public scoreboard and next-game callouts
-            </p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-semibold tracking-tight">Live Match Center</h2>
+            <p className="text-xs text-[rgb(var(--muted-fg))] mt-1">Public scoreboard and next-game callouts</p>
+            {/* Tournament progress bar */}
+            {totalMatches > 0 && (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-[11px] text-[rgb(var(--muted-fg))] mb-1">
+                  <span>{playedMatches} of {totalMatches} matches played</span>
+                  <span>{Math.round((playedMatches / totalMatches) * 100)}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-[rgb(var(--surface-hover))] overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                    style={{ width: `${(playedMatches / totalMatches) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
             {lastUpdated && (
-              <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1 flex items-center gap-1.5">
-                <RefreshCw
-                  size={10}
-                  className="animate-spin"
-                  style={{ animationDuration: "3s" }}
-                />
-                Auto-refreshing every 5s &middot; Last updated{" "}
-                {lastUpdated.toLocaleTimeString()} (
-                {Math.max(
-                  0,
-                  Math.floor((now.getTime() - lastUpdated.getTime()) / 1000),
-                )}
-                s ago)
+              <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-2 flex items-center gap-1.5">
+                <RefreshCw size={10} className="animate-spin" style={{ animationDuration: "3s" }} />
+                Auto-refreshing · Last updated {lastUpdated.toLocaleTimeString()} ({Math.max(0, Math.floor((now.getTime() - lastUpdated.getTime()) / 1000))}s ago)
               </p>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
-            {(["all", "ongoing", "next"] as const).map((option) => (
-              <button
-                key={option}
-                onClick={() => setFilter(option)}
-                className={cn(
-                  "px-3 py-1.5 rounded-xl text-xs font-bold tracking-normal  border transition-colors",
-                  filter === option
-                    ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm rounded-full border-[rgb(var(--fg))]"
-                    : "border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]",
-                )}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* HIGHLIGHT ONGOING GAMES AT CENTER TOP */}
-      {(filter === "all" || filter === "ongoing") &&
-        ongoingCards.length > 0 && (
-          <div className="flex flex-col items-center mb-8 space-y-6">
-            <h2 className="text-xl font-semibold tracking-tight  text-blue-500 animate-pulse">
-              Live Now
-            </h2>
-            <div className="w-full max-w-5xl space-y-6">
-              {groupCardsBySlot(ongoingCards).map((group) => (
-                <div key={`ongoing-${group.key}`} className="space-y-3">
-                  {group.label && (
-                    <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-semibold tracking-tight  text-blue-500">
-                        {group.label}
-                      </span>
-                      <div className="flex-1 h-px bg-amber-500/30" />
-                    </div>
+          <div className="flex flex-col gap-2 items-end">
+            {/* Share button */}
+            <button
+              onClick={handleShare}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors relative"
+            >
+              <Share2 size={13} />
+              {shareToast ? "Link copied!" : "Share"}
+            </button>
+            {/* Filter bar */}
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                { key: "all", label: "All Games", icon: <Globe size={12} /> },
+                { key: "ongoing", label: "Live Now", icon: <Radio size={12} className="text-red-400" /> },
+                { key: "next", label: "Up Next", icon: <ChevronRight size={12} /> },
+              ] as const).map((option) => (
+                <button
+                  key={option.key}
+                  onClick={() => setFilter(option.key)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold tracking-normal border transition-colors",
+                    filter === option.key
+                      ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                      : "border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]",
                   )}
-                  <div
-                    className={cn(
-                      "grid gap-4",
-                      group.cards.length > 1
-                        ? "grid-cols-1 md:grid-cols-2"
-                        : "grid-cols-1",
-                    )}
-                  >
-                    {group.cards.map((card) => (
-                      <div
-                        key={`ongoing-${card.id}`}
-                        className="glass border-2 border-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.2)] rounded-xl p-6 text-center transform hover:scale-[1.02] transition-transform"
-                      >
-                        <p className="text-sm font-bold tracking-tight  text-blue-500 mb-1">
-                          {card.title}
-                        </p>
-                        <p className="text-xs text-[rgb(var(--muted-fg))] mb-4">
-                          {card.subtitle}
-                        </p>
-                        <div className="flex justify-center items-center gap-4 sm:gap-6">
-                          <div className="flex-1 text-right">
-                            <p className="font-bold text-base sm:text-lg line-clamp-2">
-                              {card.teamAName}
-                            </p>
-                          </div>
-                          <div className="bg-blue-500/10 px-4 py-2 rounded-xl font-semibold text-2xl sm:text-3xl text-blue-500 min-w-[90px]">
-                            {card.scoreA ?? 0} - {card.scoreB ?? 0}
-                          </div>
-                          <div className="flex-1 text-left">
-                            <p className="font-bold text-base sm:text-lg line-clamp-2">
-                              {card.teamBName}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                >
+                  {option.icon} {option.label}
+                </button>
               ))}
             </div>
           </div>
-        )}
+        </div>
 
-      {(standingsA.length > 0 || standingsB.length > 0) && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {standingsA.length > 0 && (
-            <div className="glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-4">
-              <h3 className="text-xs font-bold tracking-tight  mb-3">
-                Pool A Leaderboard
-              </h3>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[420px] text-xs">
-                  <thead>
-                    <tr className="text-[rgb(var(--muted-fg))] tracking-normal ">
-                      {["#", "Team", "W", "L", "PF", "PA", "Quotient"].map(
-                        (heading) => (
-                          <th
-                            key={heading}
-                            className="py-2 text-left font-bold last:text-right"
-                          >
-                            {heading}
-                          </th>
-                        ),
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {standingsA.map((team) => (
-                      <tr
-                        key={team.team.id}
-                        className="border-t border-[rgb(var(--border-soft))]"
-                      >
-                        <td className="py-2 font-mono text-[rgb(var(--muted-fg))]">
-                          {team.rank}
-                        </td>
-                        <td className="py-2 font-semibold">{team.team.name}</td>
-                        <td className="py-2">{team.wins}</td>
-                        <td className="py-2">{team.losses}</td>
-                        <td className="py-2">{team.pointsFor}</td>
-                        <td className="py-2">{team.pointsAgainst}</td>
-                        <td className="py-2 text-right font-mono">
-                          {team.quotient.toFixed(3)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        {/* Team follow filter */}
+        {allTeamNames.length > 0 && (
+          <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1">
+            <span className="text-[10px] text-[rgb(var(--muted-fg))] whitespace-nowrap font-medium flex-shrink-0">Follow:</span>
+            {followTeam && (
+              <button
+                onClick={() => setFollowTeam(null)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-600 text-white flex-shrink-0"
+              >
+                {followTeam} <X size={10} />
+              </button>
+            )}
+            {allTeamNames.filter((n) => n !== followTeam).map((name) => (
+              <button
+                key={name}
+                onClick={() => setFollowTeam(name)}
+                className="px-2.5 py-1 rounded-full text-[11px] font-medium border border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:border-blue-500/40 whitespace-nowrap flex-shrink-0 transition-colors"
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Court map — when 2+ games ongoing */}
+      {ongoingCards.length > 1 && (
+        <div className="glass border border-[rgb(var(--border-soft))] rounded-xl p-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-[rgb(var(--muted-fg))] mb-2">Courts Active Now</p>
+          <div className="flex flex-wrap gap-2">
+            {ongoingCards.map((c) => (
+              <div key={c.id} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] text-xs">
+                <span className="font-bold text-amber-400">{c.court ? `Court ${c.court}` : "Court ?"}</span>
+                <span className="text-[rgb(var(--muted-fg))]">·</span>
+                <span className="font-medium">{c.teamAName}</span>
+                <span className="text-[rgb(var(--muted-fg))]">vs</span>
+                <span className="font-medium">{c.teamBName}</span>
               </div>
-            </div>
-          )}
-          {standingsB.length > 0 && (
-            <div className="glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-4">
-              <h3 className="text-xs font-bold tracking-tight  mb-3">
-                Pool B Leaderboard
-              </h3>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[420px] text-xs">
-                  <thead>
-                    <tr className="text-[rgb(var(--muted-fg))] tracking-normal ">
-                      {["#", "Team", "W", "L", "PF", "PA", "Quotient"].map(
-                        (heading) => (
-                          <th
-                            key={heading}
-                            className="py-2 text-left font-bold last:text-right"
-                          >
-                            {heading}
-                          </th>
-                        ),
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {standingsB.map((team) => (
-                      <tr
-                        key={team.team.id}
-                        className="border-t border-[rgb(var(--border-soft))]"
-                      >
-                        <td className="py-2 font-mono text-[rgb(var(--muted-fg))]">
-                          {team.rank}
-                        </td>
-                        <td className="py-2 font-semibold">{team.team.name}</td>
-                        <td className="py-2">{team.wins}</td>
-                        <td className="py-2">{team.losses}</td>
-                        <td className="py-2">{team.pointsFor}</td>
-                        <td className="py-2">{team.pointsAgainst}</td>
-                        <td className="py-2 text-right font-mono">
-                          {team.quotient.toFixed(3)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* UP NEXT banner */}
+      {nextCards.length > 0 && filter !== "ongoing" && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30">
+          <ChevronRight size={16} className="text-amber-400 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">Up Next</span>
+            <p className="text-sm font-bold truncate">
+              {nextCards[0].teamAName} vs {nextCards[0].teamBName}
+              {nextCards[0].court && <span className="font-normal text-amber-400/70"> · Court {nextCards[0].court}</span>}
+            </p>
+          </div>
+          {nextCards.length > 1 && (
+            <span className="text-[11px] text-amber-400 flex-shrink-0">+{nextCards.length - 1} more</span>
           )}
         </div>
       )}
 
-      {filteredCards.length === 0 ? (
-        <div className="text-center py-14 rounded-xl border border-[rgb(var(--border-soft))] shadow-sm glass text-[rgb(var(--muted-fg))]">
+      {/* ONGOING highlight section */}
+      {(filter === "all" || filter === "ongoing") && ongoingCards.length > 0 && (
+        <div className="flex flex-col items-center mb-2 space-y-4">
+          <h2 className="text-xl font-semibold tracking-tight text-blue-500 animate-pulse flex items-center gap-2">
+            <Radio size={18} /> Live Now
+          </h2>
+          <div className="w-full max-w-5xl space-y-4">
+            {groupCardsBySlot(applyFollowFilter(ongoingCards)).map((group) => (
+              <div key={`ongoing-${group.key}`} className="space-y-3">
+                {group.label && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-semibold tracking-tight text-blue-500">{group.label}</span>
+                    <div className="flex-1 h-px bg-amber-500/30" />
+                  </div>
+                )}
+                <div className={cn("grid gap-4", group.cards.length > 1 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1")}>
+                  {group.cards.map((card) => (
+                    <div key={`ongoing-${card.id}`}
+                      className="glass border-2 border-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.2)] rounded-xl p-6 text-center">
+                      <p className="text-sm font-bold tracking-tight text-blue-500 mb-1">{card.title}</p>
+                      <p className="text-xs text-[rgb(var(--muted-fg))] mb-4">{card.subtitle}</p>
+                      <div className="flex justify-center items-center gap-4 sm:gap-6">
+                        <div className="flex-1 text-right">
+                          <p className="font-bold text-base sm:text-lg line-clamp-2">{card.teamAName}</p>
+                        </div>
+                        <div className="bg-blue-500/10 px-4 py-2 rounded-xl font-semibold text-2xl sm:text-3xl text-blue-500 min-w-[90px] flex items-center justify-center gap-2">
+                          <span className={cn("transition-all duration-300", flashMap[`${card.id}-A`] && "text-amber-400 scale-125")}>
+                            {card.scoreA ?? 0}
+                          </span>
+                          <span className="text-lg text-[rgb(var(--muted-fg))]">-</span>
+                          <span className={cn("transition-all duration-300", flashMap[`${card.id}-B`] && "text-amber-400 scale-125")}>
+                            {card.scoreB ?? 0}
+                          </span>
+                        </div>
+                        <div className="flex-1 text-left">
+                          <p className="font-bold text-base sm:text-lg line-clamp-2">{card.teamBName}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Standings — always visible */}
+      {(standingsA.length > 0 || standingsB.length > 0) && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {standingsA.length > 0 && renderLiveStandings(standingsA, "Pool A Standings")}
+          {standingsB.length > 0 && renderLiveStandings(standingsB, "Pool B Standings")}
+        </div>
+      )}
+
+      {/* Active games list (pending + next, no done) */}
+      {filteredActiveCards.filter((c) => c.status !== "ongoing").length === 0 && filter !== "ongoing" ? (
+        <div className="text-center py-14 rounded-xl border border-[rgb(var(--border-soft))] glass text-[rgb(var(--muted-fg))]">
           No games to display for this filter.
         </div>
       ) : (
         <div className="space-y-5">
-          {groupCardsBySlot(filteredCards).map((group) => (
+          {groupCardsBySlot(filteredActiveCards.filter((c) => c.status !== "ongoing")).map((group) => (
             <div key={`list-${group.key}`} className="space-y-2">
               {group.label && group.cards.length > 1 && (
                 <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-semibold tracking-tight  text-[rgb(var(--muted-fg))]">
-                    {group.label}
-                  </span>
+                  <span className="text-[10px] font-semibold tracking-tight text-[rgb(var(--muted-fg))]">{group.label}</span>
                   <div className="flex-1 h-px bg-[rgb(var(--border))]" />
                 </div>
               )}
-              <div
-                className={cn(
-                  "grid gap-4",
-                  group.cards.length > 1
-                    ? "grid-cols-1 md:grid-cols-2"
-                    : "grid-cols-1 lg:grid-cols-2",
-                )}
-              >
+              <div className={cn("grid gap-4", group.cards.length > 1 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1 lg:grid-cols-2")}>
                 {group.cards.map((card) => (
-                  <div
-                    key={card.id}
-                    className="glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-4 space-y-3"
-                  >
+                  <div key={card.id} className="glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-bold tracking-tight ">
-                          {card.title}
-                        </p>
-                        <p className="text-[11px] text-[rgb(var(--muted-fg))]">
-                          {card.subtitle}
-                        </p>
+                        <p className="text-xs font-bold tracking-tight">{card.title}</p>
+                        <p className="text-[11px] text-[rgb(var(--muted-fg))]">{card.subtitle}</p>
                       </div>
-                      <span
-                        className={cn(
-                          "text-[10px] font-bold tracking-tight  px-2 py-1 rounded",
-                          card.status === "done"
-                            ? "bg-blue-500/10 text-blue-500"
-                            : card.status === "ongoing"
-                              ? "bg-amber-500/15 text-blue-500"
-                              : card.status === "next"
-                                ? "bg-blue-500/15 text-blue-400"
-                                : "bg-slate-500/15 text-slate-400",
-                        )}
-                      >
-                        {card.status}
+                      <span className={cn(
+                        "text-[10px] font-bold tracking-tight px-2 py-1 rounded",
+                        card.status === "done" ? "bg-blue-500/10 text-blue-500"
+                          : card.status === "next" ? "bg-amber-500/15 text-amber-400"
+                          : "bg-slate-500/15 text-slate-400",
+                      )}>
+                        {card.status === "next" ? "Up Next" : card.status}
                       </span>
                     </div>
-
                     <div className="space-y-2 text-sm">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-semibold truncate inline-flex items-center gap-1.5">
-                          {card.isComplete &&
-                            card.scoreA !== null &&
-                            card.scoreB !== null &&
-                            card.scoreA > card.scoreB && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500">
-                                W
+                      {[
+                        { name: card.teamAName, score: card.scoreA, won: card.isComplete && card.scoreA !== null && card.scoreB !== null && card.scoreA > card.scoreB, flashKey: `${card.id}-A` },
+                        { name: card.teamBName, score: card.scoreB, won: card.isComplete && card.scoreA !== null && card.scoreB !== null && card.scoreB > card.scoreA, flashKey: `${card.id}-B` },
+                      ].map((team) => (
+                        <div key={team.name} className="flex items-center justify-between gap-3">
+                          <span className="font-semibold truncate inline-flex items-center gap-1.5">
+                            {card.isComplete && (
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${team.won ? "bg-blue-500/10 text-blue-500" : "bg-red-500/15 text-red-400"}`}>
+                                {team.won ? "W" : "L"}
                               </span>
                             )}
-                          {card.isComplete &&
-                            card.scoreA !== null &&
-                            card.scoreB !== null &&
-                            card.scoreA < card.scoreB && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">
-                                L
-                              </span>
-                            )}
-                          {card.teamAName}
-                        </span>
-                        <span className="font-mono text-base">
-                          {card.scoreA ?? "-"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-semibold truncate inline-flex items-center gap-1.5">
-                          {card.isComplete &&
-                            card.scoreA !== null &&
-                            card.scoreB !== null &&
-                            card.scoreB > card.scoreA && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500">
-                                W
-                              </span>
-                            )}
-                          {card.isComplete &&
-                            card.scoreA !== null &&
-                            card.scoreB !== null &&
-                            card.scoreB < card.scoreA && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">
-                                L
-                              </span>
-                            )}
-                          {card.teamBName}
-                        </span>
-                        <span className="font-mono text-base">
-                          {card.scoreB ?? "-"}
-                        </span>
-                      </div>
+                            {team.name}
+                          </span>
+                          <span className={cn("font-mono text-base transition-all duration-300", flashMap[team.flashKey] && "text-amber-400 scale-110 font-bold")}>
+                            {team.score ?? "-"}
+                          </span>
+                        </div>
+                      ))}
                     </div>
+                    {/* Stats link on completed cards */}
+                    {card.isComplete && (
+                      <div className="pt-1 border-t border-[rgb(var(--border-soft))]">
+                        <Link to="/leaderboard" className="text-[10px] text-blue-400 hover:underline flex items-center gap-1">
+                          <BarChart2 size={10} /> View player stats →
+                        </Link>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Completed games — collapsible */}
+      {completedCards.length > 0 && filter === "all" && (
+        <div className="glass border border-[rgb(var(--border-soft))] rounded-xl overflow-hidden">
+          <button
+            onClick={() => setCompletedOpen((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 hover:bg-[rgb(var(--surface-hover))] transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Trophy size={14} className="text-[rgb(var(--muted-fg))]" />
+              <span className="text-sm font-semibold">Completed ({completedCards.length})</span>
+            </div>
+            <ChevronRight size={16} className={cn("text-[rgb(var(--muted-fg))] transition-transform", completedOpen && "rotate-90")} />
+          </button>
+          {completedOpen && (
+            <div className="p-3 border-t border-[rgb(var(--border-soft))]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {applyFollowFilter(completedCards).map((card) => (
+                  <div key={`done-${card.id}`} className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] text-xs">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-[rgb(var(--muted-fg))]">{card.title}</p>
+                      <p className="font-semibold truncate">{card.teamAName} vs {card.teamBName}</p>
+                    </div>
+                    <div className="font-mono font-bold text-sm tabular-nums flex-shrink-0">
+                      {card.scoreA} – {card.scoreB}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
