@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { MessageCircle, X, Send, Trash2 } from "lucide-react";
+import { useLocation } from "@tanstack/react-router";
 
 type Message = {
   id: string;
@@ -7,7 +8,29 @@ type Message = {
   content: string;
 };
 
+// Context-aware prompt chips per route
+const PROMPT_CHIPS: Record<string, string[]> = {
+  "/":              ["What's the latest announcement?", "Who are the Rebels?", "When is the next tournament?"],
+  "/leaderboard":   ["Who leads in attack efficiency?", "Who has the most aces?", "Best pass efficiency this season?"],
+  "/vis-stats":     ["What's a good pass rating target?", "How is attack efficiency calculated?", "What does BHE mean?"],
+  "/player-dex":    ["Who plays as Libero?", "Who is the team captain?", "Show me the setters"],
+  "/tournaments":   ["What is the current standings?", "How does the bracket work?", "When is the next match?"],
+  "/gallery":       ["What events are shown here?", "How do I upload a photo?"],
+  "/social":        ["Where can I follow the Rebels?"],
+}
+
+function getChips(pathname: string): string[] {
+  for (const [route, chips] of Object.entries(PROMPT_CHIPS)) {
+    if (pathname === route || (route !== "/" && pathname.startsWith(route))) {
+      return chips
+    }
+  }
+  return ["Tell me about the Rebels", "When is the next game?", "Who are the top players?"]
+}
+
 export function ChatBot() {
+  const location = useLocation();
+  const chips = getChips(location.pathname);
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -143,17 +166,27 @@ export function ChatBot() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
             {messages.length === 0 && (
-              <div className="text-center text-[rgb(var(--muted-fg))] text-sm py-8">
-                <MessageCircle
-                  size={32}
-                  className="mx-auto mb-3 opacity-40"
-                />
-                <p className="font-medium">
-                  Ask me anything about the Rebels!
-                </p>
-                <p className="text-xs mt-1 opacity-70">
-                  Players, positions, schedules, and more
-                </p>
+              <div className="py-6">
+                <div className="text-center text-[rgb(var(--muted-fg))] text-sm mb-5">
+                  <MessageCircle size={32} className="mx-auto mb-3 opacity-40" />
+                  <p className="font-medium">Ask me anything about the Rebels!</p>
+                  <p className="text-xs mt-1 opacity-70">Players, positions, schedules, and more</p>
+                </div>
+                {/* Context-aware prompt chips */}
+                <div className="flex flex-col gap-2 px-1">
+                  {chips.map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => {
+                        setInput(chip);
+                        setTimeout(() => textareaRef.current?.focus(), 0);
+                      }}
+                      className="text-left text-xs px-3 py-2 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--bg))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:border-blue-500/40 hover:bg-blue-500/5 transition-all"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
