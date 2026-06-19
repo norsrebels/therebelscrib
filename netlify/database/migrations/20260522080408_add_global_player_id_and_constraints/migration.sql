@@ -1,0 +1,3 @@
+ALTER TABLE "vis_match_players" ADD COLUMN "global_player_id" integer;--> statement-breakpoint
+ALTER TABLE "vis_set_stats" ADD CONSTRAINT "vis_set_stats_player_set_unique" UNIQUE("match_id","player_id","set_number");--> statement-breakpoint
+ALTER TABLE "vis_match_players" ADD CONSTRAINT "vis_match_players_global_player_id_players_id_fkey" FOREIGN KEY ("global_player_id") REFERENCES "players"("id") ON DELETE SET NULL;

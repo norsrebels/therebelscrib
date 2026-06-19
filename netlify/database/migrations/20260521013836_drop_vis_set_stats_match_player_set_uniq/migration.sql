@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS "vis_set_stats_match_player_set_uniq";

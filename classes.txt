@@ -1,0 +1,245 @@
+83:    <div className="relative">
+84:      <div className="flex items-center gap-2">
+87:          className="flex-1 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-lg px-3 py-2 text-[rgb(var(--fg))] text-sm placeholder:text-[rgb(var(--muted-fg))] focus:border-[rgb(var(--fg))]"
+95:          className="bg-[rgb(var(--fg))] text-[rgb(var(--bg))] font-bold text-xs px-3 py-2 rounded-lg"
+101:        <div className="absolute z-10 w-full mt-1 bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-lg shadow-lg max-h-40 overflow-y-auto">
+110:              className="w-full text-left px-4 py-2 hover:bg-[rgb(var(--bg))] text-sm text-[rgb(var(--fg))]"
+112:              <div className="font-semibold">{r.name}</div>
+113:              <div className="text-[10px] text-[rgb(var(--muted-fg))] uppercase tracking-widest">
+150:    <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-4">
+151:      <div className="flex items-center justify-between">
+153:          <h4 className="font-bold text-sm text-[rgb(var(--fg))]">{team.name}</h4>
+154:          <p className="text-xs text-[rgb(var(--muted-fg))] tracking-widest uppercase">{team.players.length} Players</p>
+156:        <div className="flex items-center gap-3">
+158:            className="bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded px-2 py-1 text-xs text-[rgb(var(--fg))]"
+165:            className="bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded px-2 py-1 text-xs text-[rgb(var(--fg))]"
+174:            className="text-xs font-bold text-[rgb(var(--fg))] border border-[rgb(var(--border-soft))] rounded px-2 py-1"
+182:        <div className="mt-4 pt-4 border-t border-[rgb(var(--border-soft))] space-y-4">
+185:          <div className="space-y-2">
+187:              <div key={p.id} className="flex flex-wrap items-center gap-2 bg-[rgb(var(--bg))] p-2 rounded-lg">
+188:                <span className="text-xs text-[rgb(var(--muted-fg))] w-4">{i + 1}</span>
+190:                  className="flex-1 min-w-[120px] bg-transparent border-none text-sm font-semibold text-[rgb(var(--fg))] focus:outline-none"
+195:                  className="bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] rounded px-1.5 py-1 text-[10px] text-[rgb(var(--fg))] uppercase tracking-widest"
+203:                  className="bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] rounded px-1.5 py-1 text-[10px] text-[rgb(var(--fg))] uppercase tracking-widest"
+211:                  className={cn("border rounded px-1.5 py-1 text-[10px] uppercase tracking-widest font-bold",
+221:                <button onClick={() => removePlayer(p.id)} className="text-[rgb(var(--muted-fg))] hover:text-red-400">
+227:              <p className="text-xs text-red-400 italic">Warning: Minimum 6 players recommended.</p>
+262:    <div className="space-y-6">
+263:      <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-5">
+264:        <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[rgb(var(--fg))] mb-4">Register Team</h3>
+265:        <div className="flex gap-3 flex-wrap">
+267:            className="flex-1 min-w-[200px] bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-lg px-4 py-2.5 text-[rgb(var(--fg))] placeholder:text-[rgb(var(--muted-fg))] text-sm"
+274:            className="bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-lg px-4 py-2.5 text-[rgb(var(--fg))] text-sm"
+283:            className="flex items-center gap-2 bg-[rgb(var(--fg))] text-[rgb(var(--bg))] font-bold text-sm tracking-wider px-5 py-2.5 rounded-lg"
+290:      <div className="space-y-4">
+292:          <div key={team.id} className="relative">
+293:            <button onClick={() => removeTeam(team.id)} className="absolute top-4 right-4 z-10 text-[rgb(var(--muted-fg))] hover:text-red-400">
+302:        <div className="flex justify-center mt-8">
+312:            className="flex items-center gap-2 border border-[rgb(var(--fg))] text-[rgb(var(--fg))] font-bold text-sm tracking-wider px-6 py-3 rounded-lg hover:bg-[rgb(var(--fg))] hover:text-[rgb(var(--bg))]"
+334:    <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
+335:      <div className="flex flex-col items-center justify-center w-14 shrink-0">
+336:        <span className="text-[10px] font-bold tracking-widest uppercase text-[rgb(var(--muted-fg))]">Pool {m.pool}</span>
+337:        <span className="text-[rgb(var(--muted-fg))] text-xs font-mono font-bold">G{m.gameNum} · R{m.round}</span>
+339:          className="w-14 text-center text-[10px] mt-1 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded text-[rgb(var(--fg))] uppercase"
+345:      <div className="flex items-center gap-3 flex-1 min-w-0">
+346:        <span className={cn('text-sm font-semibold truncate flex-1 text-right', winA ? 'text-[rgb(var(--fg))]' : done ? 'text-[rgb(var(--muted-fg))]' : 'text-[rgb(var(--fg))]')}>
+347:          <span className="inline-flex items-center gap-1.5 justify-end">
+349:            {winA && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">W</span>}
+350:            {winB && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">L</span>}
+353:        <div className="flex items-center gap-2">
+354:          <div className="flex items-center gap-1">
+356:              <button onClick={() => updateMatch(m.id, { scoreA: Math.max(0, (m.scoreA ?? 0) - 1) })} className="w-7 h-7 flex items-center justify-center rounded bg-red-500/15 text-red-400 font-bold text-sm hover:bg-red-500/25">-</button>
+360:              className="w-14 text-center bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-lg py-1.5 text-[rgb(var(--fg))] font-bold"
+365:              <button onClick={() => updateMatch(m.id, { scoreA: (m.scoreA ?? 0) + 1 })} className="w-7 h-7 flex items-center justify-center rounded bg-emerald-500/15 text-emerald-400 font-bold text-sm hover:bg-emerald-500/25">+</button>
+368:          <span className="text-[rgb(var(--muted-fg))] text-xs">vs</span>
+369:          <div className="flex items-center gap-1">
+371:              <button onClick={() => updateMatch(m.id, { scoreB: Math.max(0, (m.scoreB ?? 0) - 1) })} className="w-7 h-7 flex items-center justify-center rounded bg-red-500/15 text-red-400 font-bold text-sm hover:bg-red-500/25">-</button>
+375:              className="w-14 text-center bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-lg py-1.5 text-[rgb(var(--fg))] font-bold"
+380:              <button onClick={() => updateMatch(m.id, { scoreB: (m.scoreB ?? 0) + 1 })} className="w-7 h-7 flex items-center justify-center rounded bg-emerald-500/15 text-emerald-400 font-bold text-sm hover:bg-emerald-500/25">+</button>
+384:        <span className={cn('text-sm font-semibold truncate flex-1', winB ? 'text-[rgb(var(--fg))]' : done ? 'text-[rgb(var(--muted-fg))]' : 'text-[rgb(var(--fg))]')}>
+385:          <span className="inline-flex items-center gap-1.5">
+386:            {winB && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">W</span>}
+387:            {winA && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">L</span>}
+392:      <div className="flex items-center gap-2 min-w-[180px]">
+393:        <span className="text-[10px] tracking-widest uppercase text-[rgb(var(--muted-fg))]">Refs</span>
+395:          className="flex-1 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-lg px-2.5 py-1.5 text-[rgb(var(--fg))] text-xs"
+419:      <div className="text-center py-16 text-[rgb(var(--muted-fg))]">
+420:        <Calendar size={40} className="mx-auto mb-3 opacity-40" />
+421:        <p className="text-sm">No schedule generated yet.</p>
+439:    <div className="space-y-6">
+441:        <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-4">
+442:          <p className="text-xs tracking-widest uppercase text-[rgb(var(--muted-fg))]">
+443:            <span className="font-bold text-[rgb(var(--fg))]">Simultaneous play:</span> Pool A and Pool B run side-by-side. Game N in Pool A is played at the same time slot as Game N in Pool B.
+449:        <div className="hidden md:grid grid-cols-[80px_1fr_1fr] gap-3 px-2">
+451:          <div className="text-xs font-bold tracking-[0.2em] uppercase text-[rgb(var(--fg))]">Pool A</div>
+452:          <div className="text-xs font-bold tracking-[0.2em] uppercase text-[rgb(var(--fg))]">Pool B</div>
+455:        <div className="text-xs font-bold tracking-[0.2em] uppercase text-[rgb(var(--fg))]">
+460:      <div className="space-y-4">
+466:            <div key={slotNum} className={cn('grid gap-3 items-stretch', dual ? 'grid-cols-1 md:grid-cols-[80px_1fr_1fr]' : 'grid-cols-1 md:grid-cols-[80px_1fr]')}>
+467:              <div className="flex md:flex-col items-center md:items-start justify-start gap-2 md:gap-1 md:pt-3">
+468:                <span className="text-[10px] tracking-widest uppercase text-[rgb(var(--muted-fg))]">Slot</span>
+469:                <span className="text-lg font-black text-[rgb(var(--fg))] font-mono">{slotNum}</span>
+470:                {dual && <span className="text-[9px] tracking-widest uppercase text-amber-500 hidden md:inline">Simul.</span>}
+476:                  <div className="bg-[rgb(var(--bg))] border border-dashed border-[rgb(var(--border-soft))] rounded-xl px-4 py-3 text-xs text-[rgb(var(--muted-fg))] italic flex items-center justify-center">No Pool A game</div>
+483:                  <div className="bg-[rgb(var(--bg))] border border-dashed border-[rgb(var(--border-soft))] rounded-xl px-4 py-3 text-xs text-[rgb(var(--muted-fg))] italic flex items-center justify-center">No Pool B game</div>
+496:    <div className="mb-8">
+497:      <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[rgb(var(--fg))] mb-4">{poolLabel}</h3>
+498:      <div className="overflow-x-auto bg-[rgb(var(--surface))] rounded-xl border border-[rgb(var(--border))]">
+499:        <table className="w-full text-sm">
+501:            <tr className="border-b border-[rgb(var(--border))] bg-[rgb(var(--bg))]">
+503:                <th key={h} className="text-left py-3 px-4 text-xs font-bold tracking-[0.15em] text-[rgb(var(--muted-fg))] last:text-right">{h}</th>
+509:              <tr><td colSpan={8} className="text-center py-6 text-[rgb(var(--muted-fg))] italic">No results yet</td></tr>
+511:              <tr key={s.team.id} className="border-b border-[rgb(var(--border-soft))] last:border-0 hover:bg-[rgb(var(--bg))]">
+512:                <td className="py-3 px-4 text-[rgb(var(--muted-fg))] font-mono text-xs">{s.rank}</td>
+513:                <td className="py-3 px-4 font-semibold text-[rgb(var(--fg))]">{s.team.name}</td>
+514:                <td className="py-3 px-4 font-bold text-[rgb(var(--fg))]">{s.wins}</td>
+515:                <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">{s.losses}</td>
+516:                <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">{s.gamesPlayed}</td>
+517:                <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">{s.pointsFor}</td>
+518:                <td className="py-3 px-4 text-[rgb(var(--muted-fg))]">{s.pointsAgainst}</td>
+519:                <td className="py-3 px-4 text-right font-mono text-[rgb(var(--fg))]">{s.quotient.toFixed(3)}</td>
+532:    return <div className="text-center py-16 text-[rgb(var(--muted-fg))]">No teams or results.</div>
+577:    return <div className="text-center py-16 text-[rgb(var(--muted-fg))]">Add correct number of teams (e.g. 4, 5, 8, 10) to unlock brackets.</div>
+587:    <div className="space-y-6 relative" id="brackets-export-area">
+588:      <div className="flex justify-end mb-4">
+589:        <button onClick={() => setState({ ...state, playoffGames: [] })} className="text-xs text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] flex items-center gap-1">
+599:            <div className="flex items-center gap-3 mb-3">
+600:              <span className={cn('text-xs font-bold tracking-[0.2em] uppercase', PHASE_COLORS[phase as keyof typeof PHASE_COLORS])}>
+603:              <div className="flex-1 h-px bg-[rgb(var(--border))]" />
+605:            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+610:                  <div key={g.slot} className={cn('bg-[rgb(var(--surface))] border rounded-xl p-4', g.phase === 'championship' ? 'border-[rgb(var(--fg)/0.3)]' : 'border-[rgb(var(--border))]')}>
+611:                    <div className="flex items-center justify-between mb-3">
+612:                      <div className="flex items-center gap-2">
+613:                        <span className="text-xs font-mono text-[rgb(var(--muted-fg))]">{g.slot}</span>
+615:                          className="w-16 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] text-[10px] uppercase text-center px-1 py-0.5 rounded text-[rgb(var(--fg))]"
+621:                      <span className={cn('text-[10px] font-bold tracking-widest uppercase', PHASE_COLORS[g.phase as PlayoffPhase])}>{g.label}</span>
+623:                    <div className="space-y-2">
+633:                        <div key={i} className="flex items-center justify-between gap-3">
+634:                          <div className="flex items-center gap-2 truncate">
+635:                            {isWinner && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">W</span>}
+636:                            {isLoser && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">L</span>}
+637:                            <span className={cn('text-sm font-semibold truncate', row.t ? 'text-[rgb(var(--fg))]' : 'text-[rgb(var(--muted-fg))] italic')}>
+641:                          <div className="flex items-center gap-1">
+643:                              <button onClick={() => updateScore(g.slot, row.f, String(Math.max(0, (row.sc ?? 0) - 1)))} className="w-7 h-7 flex items-center justify-center rounded bg-red-500/15 text-red-400 font-bold text-sm hover:bg-red-500/25">-</button>
+645:                            <input type="number" min="0" disabled={!row.t} className="w-14 text-center bg-[rgb(var(--bg))] border rounded py-1 font-bold disabled:opacity-30 text-[rgb(var(--fg))]" value={row.sc ?? ''} onChange={e => updateScore(g.slot, row.f, e.target.value)} />
+647:                              <button onClick={() => updateScore(g.slot, row.f, String((row.sc ?? 0) + 1))} className="w-7 h-7 flex items-center justify-center rounded bg-emerald-500/15 text-emerald-400 font-bold text-sm hover:bg-emerald-500/25">+</button>
+828:    <div className="space-y-6">
+829:      <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-4 sm:p-5">
+830:        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+832:            <h2 className="text-sm font-black tracking-[0.14em] uppercase">Live Match Center</h2>
+833:            <p className="text-xs text-[rgb(var(--muted-fg))] tracking-wider mt-1">Public scoreboard and next-game callouts</p>
+835:              <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1 flex items-center gap-1.5">
+836:                <RefreshCw size={10} className="animate-spin" style={{ animationDuration: '3s' }} />
+841:          <div className="flex flex-wrap gap-2">
+846:                className={cn(
+862:        <div className="flex flex-col items-center mb-8 space-y-6">
+863:          <h2 className="text-xl font-black tracking-[0.14em] uppercase text-amber-500 animate-pulse">Live Now</h2>
+864:          <div className="w-full max-w-5xl space-y-6">
+866:              <div key={`ongoing-${group.key}`} className="space-y-3">
+868:                  <div className="flex items-center gap-3">
+869:                    <span className="text-[10px] font-black tracking-[0.2em] uppercase text-amber-500">{group.label}</span>
+870:                    <div className="flex-1 h-px bg-amber-500/30" />
+873:                <div className={cn('grid gap-4', group.cards.length > 1 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1')}>
+875:                    <div key={`ongoing-${card.id}`} className="bg-[rgb(var(--surface))] border-2 border-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.2)] rounded-xl p-6 text-center transform hover:scale-[1.02] transition-transform">
+876:                      <p className="text-sm font-bold tracking-[0.15em] uppercase text-amber-500 mb-1">{card.title}</p>
+877:                      <p className="text-xs text-[rgb(var(--muted-fg))] mb-4">{card.subtitle}</p>
+878:                      <div className="flex justify-center items-center gap-4 sm:gap-6">
+879:                        <div className="flex-1 text-right">
+880:                          <p className="font-bold text-base sm:text-lg line-clamp-2">{card.teamAName}</p>
+882:                        <div className="bg-amber-500/10 px-4 py-2 rounded-lg font-black text-2xl sm:text-3xl text-amber-500 min-w-[90px]">
+885:                        <div className="flex-1 text-left">
+886:                          <p className="font-bold text-base sm:text-lg line-clamp-2">{card.teamBName}</p>
+899:        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+901:            <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-4">
+902:              <h3 className="text-xs font-bold tracking-[0.15em] uppercase mb-3">Pool A Leaderboard</h3>
+903:              <div className="overflow-x-auto">
+904:                <table className="w-full min-w-[420px] text-xs">
+906:                    <tr className="text-[rgb(var(--muted-fg))] tracking-wider uppercase">
+908:                        <th key={heading} className="py-2 text-left font-bold last:text-right">{heading}</th>
+914:                      <tr key={team.team.id} className="border-t border-[rgb(var(--border-soft))]">
+915:                        <td className="py-2 font-mono text-[rgb(var(--muted-fg))]">{team.rank}</td>
+916:                        <td className="py-2 font-semibold">{team.team.name}</td>
+917:                        <td className="py-2">{team.wins}</td>
+918:                        <td className="py-2">{team.losses}</td>
+919:                        <td className="py-2">{team.pointsFor}</td>
+920:                        <td className="py-2">{team.pointsAgainst}</td>
+921:                        <td className="py-2 text-right font-mono">{team.quotient.toFixed(3)}</td>
+930:            <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-4">
+931:              <h3 className="text-xs font-bold tracking-[0.15em] uppercase mb-3">Pool B Leaderboard</h3>
+932:              <div className="overflow-x-auto">
+933:                <table className="w-full min-w-[420px] text-xs">
+935:                    <tr className="text-[rgb(var(--muted-fg))] tracking-wider uppercase">
+937:                        <th key={heading} className="py-2 text-left font-bold last:text-right">{heading}</th>
+943:                      <tr key={team.team.id} className="border-t border-[rgb(var(--border-soft))]">
+944:                        <td className="py-2 font-mono text-[rgb(var(--muted-fg))]">{team.rank}</td>
+945:                        <td className="py-2 font-semibold">{team.team.name}</td>
+946:                        <td className="py-2">{team.wins}</td>
+947:                        <td className="py-2">{team.losses}</td>
+948:                        <td className="py-2">{team.pointsFor}</td>
+949:                        <td className="py-2">{team.pointsAgainst}</td>
+950:                        <td className="py-2 text-right font-mono">{team.quotient.toFixed(3)}</td>
+962:        <div className="text-center py-14 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-[rgb(var(--muted-fg))]">
+966:        <div className="space-y-5">
+968:            <div key={`list-${group.key}`} className="space-y-2">
+970:                <div className="flex items-center gap-3">
+971:                  <span className="text-[10px] font-black tracking-[0.2em] uppercase text-[rgb(var(--muted-fg))]">{group.label}</span>
+972:                  <div className="flex-1 h-px bg-[rgb(var(--border))]" />
+975:              <div className={cn('grid gap-4', group.cards.length > 1 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2')}>
+977:                  <div key={card.id} className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-4 space-y-3">
+978:                    <div className="flex items-center justify-between gap-3">
+980:                        <p className="text-xs font-bold tracking-[0.15em] uppercase">{card.title}</p>
+981:                        <p className="text-[11px] text-[rgb(var(--muted-fg))]">{card.subtitle}</p>
+983:                      <span className={cn(
+997:                    <div className="space-y-2 text-sm">
+998:                      <div className="flex items-center justify-between gap-3">
+999:                        <span className="font-semibold truncate inline-flex items-center gap-1.5">
+1000:                          {card.isComplete && card.scoreA !== null && card.scoreB !== null && card.scoreA > card.scoreB && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">W</span>}
+1001:                          {card.isComplete && card.scoreA !== null && card.scoreB !== null && card.scoreA < card.scoreB && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">L</span>}
+1004:                        <span className="font-mono text-base">{card.scoreA ?? '-'}</span>
+1006:                      <div className="flex items-center justify-between gap-3">
+1007:                        <span className="font-semibold truncate inline-flex items-center gap-1.5">
+1008:                          {card.isComplete && card.scoreA !== null && card.scoreB !== null && card.scoreB > card.scoreA && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">W</span>}
+1009:                          {card.isComplete && card.scoreA !== null && card.scoreB !== null && card.scoreB < card.scoreA && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">L</span>}
+1012:                        <span className="font-mono text-base">{card.scoreB ?? '-'}</span>
+1028:    <div className="space-y-6 max-w-xl">
+1029:      <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-5 space-y-4">
+1030:        <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[rgb(var(--fg))]">Event Details</h3>
+1032:          <label className="text-[10px] tracking-widest uppercase text-[rgb(var(--muted-fg))] block mb-1">Schedule Name</label>
+1033:          <input className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded p-2 text-sm text-[rgb(var(--fg))]" value={state.settings.scheduleName} onChange={(e) => setState({ ...state, settings: { ...state.settings, scheduleName: e.target.value } })} />
+1036:          <label className="text-[10px] tracking-widest uppercase text-[rgb(var(--muted-fg))] block mb-1">Venue</label>
+1037:          <input className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded p-2 text-sm text-[rgb(var(--fg))]" value={state.settings.venue} onChange={(e) => setState({ ...state, settings: { ...state.settings, venue: e.target.value } })} />
+1039:        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+1040:          <div className="flex-1">
+1041:            <label className="text-[10px] tracking-widest uppercase text-[rgb(var(--muted-fg))] block mb-1">Date</label>
+1042:            <input type="date" className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded p-2 text-sm text-[rgb(var(--fg))]" value={state.settings.date} onChange={(e) => setState({ ...state, settings: { ...state.settings, date: e.target.value } })} />
+1044:          <div className="flex-1">
+1045:            <label className="text-[10px] tracking-widest uppercase text-[rgb(var(--muted-fg))] block mb-1">From Time</label>
+1046:            <input type="time" className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded p-2 text-sm text-[rgb(var(--fg))]" value={state.settings.startTime} onChange={(e) => setState({ ...state, settings: { ...state.settings, startTime: e.target.value } })} />
+1048:          <div className="flex-1">
+1049:            <label className="text-[10px] tracking-widest uppercase text-[rgb(var(--muted-fg))] block mb-1">To Time</label>
+1050:            <input type="time" className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded p-2 text-sm text-[rgb(var(--fg))]" value={state.settings.endTime} onChange={(e) => setState({ ...state, settings: { ...state.settings, endTime: e.target.value } })} />
+1054:          <label className="text-[10px] tracking-widest uppercase text-[rgb(var(--muted-fg))] block mb-1">Max Score Per Game</label>
+1055:          <input type="number" min="1" className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded p-2 text-sm text-[rgb(var(--fg))]" placeholder="e.g. 25 (leave empty for manual completion)" value={state.settings.maxScore ?? ''} onChange={(e) => setState({ ...state, settings: { ...state.settings, maxScore: e.target.value ? parseInt(e.target.value) : null } })} />
+1056:          <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1">When set, a game is only marked as Done when a team reaches this score</p>
+1060:      <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-5">
+1061:        <h3 className="text-xs font-bold tracking-[0.2em] uppercase text-[rgb(var(--fg))] mb-4">Export Data</h3>
+1062:        <div className="space-y-2">
+1063:          <button onClick={() => exportCSV(state.teams, state.poolMatches, state.settings.maxScore)} className="w-full flex items-center justify-center gap-3 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-lg py-3 text-sm font-bold">
+1066:          <button onClick={() => exportJSON(state)} className="w-full flex items-center justify-center gap-3 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-lg py-3 text-sm font-bold">
+1133:  if (!mounted) return <div className="min-h-screen bg-[rgb(var(--bg))] flex items-center justify-center">Loading…</div>
+1159:    <div className="min-h-screen bg-[rgb(var(--bg))] text-[rgb(var(--fg))]">
+1160:      <div className="bg-[rgb(var(--surface))] border-b border-[rgb(var(--border))] py-3 px-4 sm:px-6 flex flex-col lg:flex-row gap-4 lg:items-center justify-between text-xs font-bold tracking-widest uppercase">
+1161:        <div className="flex flex-wrap gap-4 items-center">
+1162:          <div className="flex items-center gap-2">
+1163:            <img src="/logo.png" alt="TR Scoresheet logo" className="h-8 w-8 rounded-md object-cover border border-[rgb(var(--border-soft))]" />
+1166:          {state.settings.venue && <span className="flex items-center gap-1 text-[rgb(var(--muted-fg))]"><MapPin size={12}/> {state.settings.venue}</span>}
+1167:          {scheduleRange && <span className="flex items-center gap-1 text-[rgb(var(--muted-fg))]"><Clock size={12}/> {scheduleRange}</span>}
+1169:        <div className="flex flex-wrap gap-2">
+1170:          <Link to="/" search={{ id: undefined }} className="flex items-center gap-1 border border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] px-3 py-1.5 rounded">Home</Link>
+1171:          <Link to="/gallery" search={{ admin: true }} className="flex items-center gap-1 border border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] px-3 py-1.5 rounded">Gallery</Link>
+1172:          <button onClick={toggleTheme} className="flex items-center gap-1 border border-[rgb(var(--border-soft))] text-[rgb(var(--fg))] px-3 py-1.5 rounded">
+1176:          {!lockView && <button onClick={copyCaptainLink} className="flex items-center gap-1 border border-blue-500/50 text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded"><Link2 size={12}/> Captain Link</button>}
+1177:          {!lockView && <button onClick={copyLiveLink} className="flex items-center gap-1 border border-green-500/50 text-green-400 bg-green-500/10 px-3 py-1.5 rounded"><Link2 size={12}/> Live Link</button>}
+1181:      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
+1186:            <div className="flex gap-1 mb-6 bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-xl p-1.5 overflow-x-auto">
+1188:                <button key={t} onClick={() => setTab(t)} className={cn('px-4 py-2 rounded-lg text-xs font-bold tracking-wider uppercase whitespace-nowrap transition-colors', tab === t ? 'bg-[rgb(var(--fg))] text-[rgb(var(--bg))]' : 'text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]')}>
