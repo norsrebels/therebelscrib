@@ -354,6 +354,9 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
     }
     sync()
   }, [online, loadStats, refreshQueueCount])
+
+  // 5-second polling for dual-statistician sync
+  useEffect(() => {
     if (!selectedMatchId || subTab !== 'live') return
     pollRef.current = setInterval(() => loadStats(true), 5000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
