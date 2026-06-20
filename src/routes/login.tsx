@@ -9,7 +9,7 @@ import {
   MissingIdentityError,
   updateUser,
 } from '@netlify/identity'
-import { useAuth, isAdminUser } from '@/lib/auth-client'
+import { useAuth } from '@/lib/auth-client'
 
 export const Route = createFileRoute('/login')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -21,7 +21,7 @@ export const Route = createFileRoute('/login')({
 
 function LoginPage() {
   const { redirect, setup } = Route.useSearch()
-  const { user, isAdmin, loading } = useAuth()
+  const { user, isAdmin, isMember, isStatistician, loading } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -45,7 +45,7 @@ function LoginPage() {
 
   useEffect(() => {
     if (loading) return
-    if (user && isAdmin) {
+    if (user) {
       window.location.href = redirect && redirect.startsWith('/') ? redirect : '/'
     }
   }, [loading, user, isAdmin, redirect])
@@ -56,11 +56,7 @@ function LoginPage() {
     setInfo(null)
     setSubmitting(true)
     try {
-      const loggedIn = await login(email.trim(), password)
-      if (!isAdminUser(loggedIn)) {
-        setError('This account does not have admin access.')
-        return
-      }
+      await login(email.trim(), password)
       window.location.href = redirect && redirect.startsWith('/') ? redirect : '/'
     } catch (err) {
       if (err instanceof MissingIdentityError) {
@@ -115,16 +111,21 @@ function LoginPage() {
           <div className="w-16 h-16 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
             <ShieldCheck size={32} />
           </div>
-          <h2 className="text-2xl font-semibold tracking-tight">Admin Sign In</h2>
+          <h2 className="text-2xl font-semibold tracking-tight">Sign In</h2>
           <p className="text-[15px] text-[rgb(var(--muted-fg))] leading-relaxed">
-            Sign in to manage your tournaments.
+            Sign in to The Rebels Crib.
           </p>
         </div>
 
-        {user && isAdmin ? (
+        {user ? (
           <div className="space-y-6">
-            <div className="rounded-2xl border border-green-500/20 bg-green-500/10 px-5 py-4 text-[15px] text-green-600 dark:text-green-400 text-center">
-              Signed in as <span className="font-semibold">{user.email}</span>
+            <div className="rounded-2xl border border-green-500/20 bg-green-500/10 px-5 py-4 text-[15px] text-green-600 dark:text-green-400 text-center space-y-2">
+              <p>Signed in as <span className="font-semibold">{user.email}</span></p>
+              <div className="flex items-center justify-center gap-2">
+                {isAdmin && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">Admin</span>}
+                {isStatistician && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">Statistician</span>}
+                {isMember && !isAdmin && !isStatistician && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">Member</span>}
+              </div>
             </div>
 
             {error && (
@@ -176,6 +177,13 @@ function LoginPage() {
               {submitting ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
+        )}
+
+        {!user && (
+          <p className="text-center text-sm text-[rgb(var(--muted-fg))]">
+            Not a member yet?{' '}
+            <a href="/join" className="text-blue-400 hover:underline font-medium">Join as Member</a>
+          </p>
         )}
 
         {!user && setup && (
