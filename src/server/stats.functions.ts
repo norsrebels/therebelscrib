@@ -105,6 +105,8 @@ export const upsertPlayerStat = createServerFn({ method: 'POST' })
         dig: playerStats.dig,
         digError: playerStats.digError,
         digAttempt: playerStats.digAttempt,
+        freeballDig: playerStats.freeballDig,
+        freeballError: playerStats.freeballError,
       }
 
       const col = colMap[fieldKey]
@@ -178,6 +180,7 @@ export const savePlayerStatRow = createServerFn({ method: 'POST' })
         'setAssist', 'setAttempt', 'setBallHandlingError',
         'blockSolo', 'blockAssist', 'blockError', 'blockRebound',
         'dig', 'digError', 'digAttempt',
+        'freeballDig', 'freeballError',
       ]
 
       const values: Record<string, number> = {}
@@ -427,3 +430,84 @@ export const getAllPlayerStats = createServerFn({ method: 'GET' })
   })
 
 // getCurrentStatUser removed — use Netlify Identity getUser() directly
+
+
+// ─── Match Finalization ──────────────────────────────────────────────────────
+
+export const finalizeMatch = createServerFn({ method: 'POST' })
+  .inputValidator((data: { matchId: string; notes?: string }) => data)
+  .handler(async ({ data }) => {
+    const identity = await getStatIdentity()
+    if (!identity || identity.role !== 'admin') throw new Error('Admin access required')
+    const ip = getClientIp()
+    return withRetry(async () => {
+      await db.execute(sql`
+        INSERT INTO match_locks (match_id, locked_by, notes)
+        VALUES (${data.matchId}, ${identity.email}, ${data.notes ?? null})
+        ON CONFLICT (match_id) DO UPDATE SET
+          locked_by = ${identity.email},
+          locked_at = now(),
+          notes = ${data.notes ?? null}
+      `)
+      await insertAudit({
+        username: identity.email,
+        userRole: identity.role,
+        action: 'MATCH_FINALIZE',
+        matchId: data.matchId,
+        newValue: data.notes ?? null,
+        ipAddress: ip,
+      })
+      return { ok: true }
+    })
+  })
+
+export const unlockMatch = createServerFn({ method: 'POST' })
+  .inputValidator((data: { matchId: string }) => data)
+  .handler(async ({ data }) => {
+    const identity = await getStatIdentity()
+    if (!identity || identity.role !== 'admin') throw new Error('Admin access required')
+    const ip = getClientIp()
+    return withRetry(async () => {
+      await db.execute(sql`DELETE FROM match_locks WHERE match_id = ${data.matchId}`)
+      await insertAudit({
+        username: identity.email,
+        userRole: identity.role,
+        action: 'MATCH_UNLOCK',
+        matchId: data.matchId,
+        ipAddress: ip,
+      })
+      return { ok: true }
+    })
+  })
+
+export const getMatchLock = createServerFn({ method: 'POST' })
+  .inputValidator((data: { matchId: string }) => data)
+  .handler(async ({ data }) => {
+    return withRetry(async () => {
+      const result = await db.execute(
+        sql`SELECT match_id, locked_by, locked_at, notes FROM match_locks WHERE match_id = ${data.matchId} LIMIT 1`
+      )
+      const rows = result.rows as any[]
+      if (rows.length === 0) return null
+      return {
+        matchId: rows[0].match_id,
+        lockedBy: rows[0].locked_by,
+        lockedAt: rows[0].locked_at,
+        notes: rows[0].notes,
+      }
+    })
+  })
+
+export const flagAuditEntry = createServerFn({ method: 'POST' })
+  .inputValidator((data: { entryId: string; flagged: boolean; note?: string }) => data)
+  .handler(async ({ data }) => {
+    const identity = await getStatIdentity()
+    if (!identity || identity.role !== 'admin') throw new Error('Admin access required')
+    return withRetry(async () => {
+      await db.execute(sql`
+        UPDATE audit_log SET flagged = ${data.flagged}, flag_note = ${data.note ?? null}
+        WHERE id = ${data.entryId}
+      `)
+      return { ok: true }
+    })
+  })
