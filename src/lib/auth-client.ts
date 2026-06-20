@@ -26,7 +26,6 @@ export function isStatisticianUser(user: User | null | undefined): boolean {
 export function isMemberUser(user: User | null | undefined): boolean {
   if (!user) return false
   const roles = (user.appMetadata?.roles ?? []) as string[]
-  // admin and statistician also get member privileges
   return roles.includes('member') || roles.includes('admin') || roles.includes('statistician')
 }
 
@@ -55,20 +54,24 @@ export function useAuth(): AuthState {
       .then((u) => {
         if (!cancelled) setUser(u ?? null)
       })
-      .catch(() => { /* Identity not configured — treat as logged out */ })
+      .catch(() => {
+        // Identity not configured or not enabled — treat as logged out
+      })
       .finally(() => {
         clearTimeout(timeout)
         if (!cancelled) setLoading(false)
       })
 
-    const unsubscribe = onAuthChange((_event, nextUser) => {
-      setUser(nextUser ?? null)
+    // onAuthChange signature: (user: User | null) => void
+    // The user param is null on logout, User object on login
+    const unsubscribe = onAuthChange((nextUser) => {
+      if (!cancelled) setUser(nextUser ?? null)
     })
 
     return () => {
       cancelled = true
       clearTimeout(timeout)
-      unsubscribe()
+      if (typeof unsubscribe === 'function') unsubscribe()
     }
   }, [])
 
