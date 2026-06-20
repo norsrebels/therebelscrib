@@ -14,13 +14,14 @@ import {
   Monitor,
   LogIn,
   LogOut,
-  ClipboardList,
-  ListOrdered,
+  UserPlus,
+  User,
+
   BarChart2,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
-import { useAuth } from '@/lib/auth-client'
+import { useAuth, getUserDisplayName } from '@/lib/auth-client'
 import { logout } from '@netlify/identity'
 
 function cn(...classes: (string | undefined | false | null)[]) {
@@ -31,40 +32,24 @@ const NAV_ITEMS = [
   { path: '/', label: 'Home', icon: Home },
   { path: '/player-dex', label: 'Player Dex', icon: Users },
   { path: '/tournaments', label: 'Tournaments', icon: Trophy },
-  { path: '/tournament-format', label: 'Format', icon: ListOrdered },
   { path: '/gallery', label: 'Gallery', icon: Image },
   { path: '/social', label: 'Social Media', icon: Share2 },
-  { path: '/vis-stats', label: 'VIS Stats', icon: ClipboardList },
   { path: '/leaderboard', label: 'Player Statistics', icon: BarChart2 },
 ]
 
-const BOTTOM_NAV_ITEMS = NAV_ITEMS.slice(0, 4)
+// Mobile bottom nav: Home, Player Dex, Tournaments, Player Statistics
+const BOTTOM_NAV_ITEMS = [NAV_ITEMS[0], NAV_ITEMS[1], NAV_ITEMS[2], NAV_ITEMS[5]]
 
 export function Sidebar() {
   const location = useLocation()
   const { isAdmin, user } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system')
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [collapsed, setCollapsed] = useState(false)
 
-  function applyTheme(t: 'light' | 'dark' | 'system') {
-    const resolved = t === 'system'
-      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : t
-    document.documentElement.setAttribute('data-theme', resolved)
-  }
-
   useEffect(() => {
-    const saved = (localStorage.getItem('tr_theme') || 'system') as 'light' | 'dark' | 'system'
-    setTheme(saved)
-    applyTheme(saved)
-    // Also listen for OS-level changes when in system mode
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = () => {
-      if ((localStorage.getItem('tr_theme') || 'system') === 'system') applyTheme('system')
-    }
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
+    const saved = localStorage.getItem('tr_theme') || 'dark'
+    setTheme(saved as 'light' | 'dark')
   }, [])
 
   useEffect(() => {
@@ -96,7 +81,6 @@ export function Sidebar() {
     }
   }, [mobileOpen])
 
-  // Cycle: light → dark → system → light
   const cycleTheme = () => {
     const order: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system']
     const next = order[(order.indexOf(theme) + 1) % order.length]
@@ -105,9 +89,11 @@ export function Sidebar() {
     applyTheme(next)
   }
 
-  const themeIcon = theme === 'dark' ? <Moon size={18} className="shrink-0" />
-    : theme === 'light' ? <Sun size={18} className="shrink-0" />
-    : <Monitor size={18} className="shrink-0" />
+  const themeIcon = theme === 'dark'
+    ? <Moon size={18} className="shrink-0" />
+    : theme === 'light'
+      ? <Sun size={18} className="shrink-0" />
+      : <Monitor size={18} className="shrink-0" />
 
   const themeLabel = theme === 'dark' ? 'Dark Mode'
     : theme === 'light' ? 'Light Mode'
@@ -197,27 +183,53 @@ export function Sidebar() {
             {!collapsed && themeLabel}
           </button>
           {user ? (
-            <button
-              onClick={handleSignOut}
-              title={collapsed ? 'Sign Out' : undefined}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors',
-                collapsed && 'justify-center',
-              )}
-            >
-              <LogOut size={18} className="shrink-0" /> {!collapsed && 'Sign Out'}
-            </button>
+            <>
+              <Link
+                to="/me"
+                title={collapsed ? 'My Profile' : undefined}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors',
+                  collapsed && 'justify-center',
+                  isActive('/me') && 'bg-blue-500/10 text-blue-500',
+                )}
+              >
+                <User size={18} className="shrink-0" />
+                {!collapsed && <span className="truncate">{user.email?.split('@')[0]}</span>}
+              </Link>
+              <button
+                onClick={handleSignOut}
+                title={collapsed ? 'Sign Out' : undefined}
+                className={cn(
+                  'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors',
+                  collapsed && 'justify-center',
+                )}
+              >
+                <LogOut size={18} className="shrink-0" /> {!collapsed && 'Sign Out'}
+              </button>
+            </>
           ) : (
-            <Link
-              to="/login"
-              title={collapsed ? 'Admin Sign In' : undefined}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors',
-                collapsed && 'justify-center',
-              )}
-            >
-              <LogIn size={18} className="shrink-0" /> {!collapsed && 'Admin Sign In'}
-            </Link>
+            <>
+              <Link
+                to="/join"
+                title={collapsed ? 'Join as Member' : undefined}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 transition-colors',
+                  collapsed && 'justify-center',
+                )}
+              >
+                <UserPlus size={18} className="shrink-0" /> {!collapsed && 'Join as Member'}
+              </Link>
+              <Link
+                to="/login"
+                title={collapsed ? 'Sign In' : undefined}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors',
+                  collapsed && 'justify-center',
+                )}
+              >
+                <LogIn size={18} className="shrink-0" /> {!collapsed && 'Sign In'}
+              </Link>
+            </>
           )}
           <button
             onClick={toggleCollapsed}
@@ -322,12 +334,18 @@ export function Sidebar() {
                 onClick={cycleTheme}
                 className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors"
               >
-                {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-                {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                {themeIcon}
+                {themeLabel}
               </button>
               {user ? (
                 <>
                   <div className="px-3 py-2 text-xs text-[rgb(var(--muted-fg))] truncate">{user.email}</div>
+                  <Link
+                    to="/me"
+                    className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors"
+                  >
+                    <User size={18} /> My Profile
+                  </Link>
                   <button
                     onClick={handleSignOut}
                     className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors"
@@ -336,12 +354,20 @@ export function Sidebar() {
                   </button>
                 </>
               ) : (
-                <Link
-                  to="/login"
-                  className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors"
-                >
-                  <LogIn size={18} /> Admin Sign In
-                </Link>
+                <>
+                  <Link
+                    to="/join"
+                    className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 transition-colors"
+                  >
+                    <UserPlus size={18} /> Join as Member
+                  </Link>
+                  <Link
+                    to="/login"
+                    className="flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors"
+                  >
+                    <LogIn size={18} /> Sign In
+                  </Link>
+                </>
               )}
             </div>
           </aside>
