@@ -27,6 +27,14 @@ export const Route = createRootRoute({
   component: RootLayout,
 })
 
+// Token types that Netlify Identity puts in the URL hash
+const IDENTITY_HASH_TOKENS = [
+  'invite_token',
+  'recovery_token',
+  'confirmation_token',
+  'access_token', // OAuth callback
+]
+
 function RootLayout() {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -36,6 +44,26 @@ function RootLayout() {
     const handler = (e: Event) => setCollapsed((e as CustomEvent<boolean>).detail)
     window.addEventListener('tr_sidebar_collapsed_change', handler)
     return () => window.removeEventListener('tr_sidebar_collapsed_change', handler)
+  }, [])
+
+  // Global Netlify Identity hash handler
+  // When a user clicks an invite/recovery/confirmation email link, Netlify
+  // appends a token to the URL hash (e.g. /#invite_token=XXX). If they land
+  // on any page other than /login the token gets ignored. This hook intercepts
+  // the hash on every page load and redirects to /login so handleAuthCallback()
+  // can process it correctly.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const hash = window.location.hash
+    if (!hash) return
+
+    const params = new URLSearchParams(hash.replace(/^#/, ''))
+    const hasIdentityToken = IDENTITY_HASH_TOKENS.some(key => params.has(key))
+
+    if (hasIdentityToken && !window.location.pathname.startsWith('/login')) {
+      // Preserve the full hash so login page can read the token
+      window.location.replace('/login' + window.location.hash)
+    }
   }, [])
 
   return (
