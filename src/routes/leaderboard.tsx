@@ -1,4 +1,4 @@
-import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { useState, useMemo, useCallback } from 'react'
 import { getAllPlayerStats } from '@/server/stats.functions'
 import {
@@ -20,9 +20,7 @@ import {
   fmtPts,
   aggregateTeamStats,
 } from '@/lib/stats/formulas'
-import { BarChart2, X, ChevronDown, Copy, Check } from 'lucide-react'
-import { LeaderboardSkeleton } from '@/components/Skeletons'
-import { LeaderboardEmptyState } from '@/components/EmptyState'
+import { BarChart2, X, ChevronDown, Download, Copy, Check } from 'lucide-react'
 
 export const Route = createFileRoute('/leaderboard')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -40,7 +38,6 @@ export const Route = createFileRoute('/leaderboard')({
       return { stats: [], players: [], schedules: [] }
     }
   },
-  pendingComponent: LeaderboardSkeleton,
   component: PlayerStatsPage,
 })
 
@@ -95,6 +92,39 @@ function PlayerStatsPage() {
       setTimeout(() => setCopiedId(null), 2000)
     })
   }, [selectedRanking])
+
+  const handleExportCSV = useCallback(() => {
+    const headers = ['Rank', 'Name', 'Jersey', 'Position', 'Sets', 'K', 'E', 'Att', 'Eff', 'Kill%', 'SA', 'SE', 'BS', 'BA', 'Blk Pts', 'D', 'DE', 'FB', 'Ast', 'PTS']
+    const rows = ranked.map((p: any, i: number) => [
+      i + 1,
+      p.name,
+      p.jersey ?? '',
+      p.position ?? '',
+      p.totalSets,
+      p.attackKill, p.attackError,
+      p.attackKill + p.attackError + p.attackAttempt,
+      p.attackKill + p.attackError + p.attackAttempt > 0
+        ? ((p.attackKill - p.attackError) / (p.attackKill + p.attackError + p.attackAttempt)).toFixed(3)
+        : '—',
+      p.attackKill + p.attackError + p.attackAttempt > 0
+        ? ((p.attackKill / (p.attackKill + p.attackError + p.attackAttempt)) * 100).toFixed(1) + '%'
+        : '—',
+      p.serveAce, p.serveError,
+      p.blockSolo, p.blockAssist,
+      (p.blockSolo + p.blockAssist * 0.5).toFixed(1),
+      p.dig, p.digError, p.freeballDig ?? 0,
+      p.setAssist,
+      p.attackKill + p.serveAce + p.blockSolo + Math.round(p.blockAssist * 0.5),
+    ])
+    const csv = [headers, ...rows].map(r => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `rebels_leaderboard_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [ranked])
 
   const selectedScheduleId = search.schedule ?? ''
   const selectedScheduleName = schedules.find((s: any) => s.id === selectedScheduleId)?.name ?? ''
@@ -237,6 +267,14 @@ function PlayerStatsPage() {
             </select>
             <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))]" size={14} />
           </div>
+          {/* Export CSV button */}
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-medium bg-[rgb(var(--surface))] border border-[rgb(var(--border))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors"
+            title="Export leaderboard as CSV"
+          >
+            <Download size={14} /> Export CSV
+          </button>
         </div>
       </div>
 
@@ -262,8 +300,7 @@ function PlayerStatsPage() {
         </div>
 
         <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-2xl overflow-hidden">
-          {/* Sticky header */}
-          <div className="sticky top-0 z-10 px-5 py-3 border-b border-[rgb(var(--border))] flex items-center justify-between bg-[rgb(var(--surface))]">
+          <div className="px-5 py-3 border-b border-[rgb(var(--border))] flex items-center justify-between">
             <div className="flex items-center gap-2">
               <BarChart2 className="text-blue-400" size={15} />
               <span className="font-semibold text-sm">{RANKINGS.find(r => r.key === selectedRanking)?.label}</span>
@@ -272,38 +309,24 @@ function PlayerStatsPage() {
           </div>
 
           {ranked.length === 0 ? (
-            <LeaderboardEmptyState />
+            <div className="text-center py-16 text-[rgb(var(--muted-fg))] text-sm">No data yet — or no players meet the minimum threshold.</div>
           ) : (
             <div>
-              {ranked.map((p, i) => {
-                const value = formatValue(p)
-                const copied = copiedId === p.playerId
-                return (
-                  <button key={p.playerId} onClick={() => setSelectedPlayer(p.playerId)}
-                    className={`w-full flex items-center gap-4 px-5 py-3.5 border-b border-[rgb(var(--border-soft))] hover:bg-[rgb(var(--surface-hover))] transition-colors text-left group ${i % 2 !== 0 ? 'bg-[rgb(var(--surface-hover))]' : ''}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${i === 0 ? 'bg-yellow-400/20 text-yellow-400 border border-yellow-400/30' : i === 1 ? 'bg-gray-400/20 text-gray-300 border border-gray-400/30' : i === 2 ? 'bg-amber-700/20 text-amber-600 border border-amber-700/30' : 'bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))]'}`}>{i + 1}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm">{p.name}</span>
-                        <span className="text-xs text-[rgb(var(--muted-fg))] font-mono">#{p.jersey ?? '?'}</span>
-                        {p.position && <span className="text-[10px] px-1.5 py-0.5 bg-[rgb(var(--surface-hover))] rounded text-[rgb(var(--muted-fg))]">{p.position}</span>}
-                      </div>
-                      <div className="text-[10px] text-[rgb(var(--muted-fg))] mt-0.5">{p.totalSets} set{p.totalSets !== 1 ? 's' : ''} played</div>
-                    </div>
+              {ranked.map((p, i) => (
+                <button key={p.playerId} onClick={() => setSelectedPlayer(p.playerId)}
+                  className={`w-full flex items-center gap-4 px-5 py-3.5 border-b border-[rgb(var(--border-soft))] hover:bg-[rgb(var(--surface-hover))] transition-colors text-left ${i % 2 !== 0 ? 'bg-[rgb(var(--surface-hover))]' : ''}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${i === 0 ? 'bg-yellow-400/20 text-yellow-400 border border-yellow-400/30' : i === 1 ? 'bg-gray-400/20 text-gray-300 border border-gray-400/30' : i === 2 ? 'bg-amber-700/20 text-amber-600 border border-amber-700/30' : 'bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))]'}`}>{i + 1}</div>
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <div className="text-base font-bold tabular-nums text-blue-400">{value}</div>
-                      {/* Copy button — visible on hover or after copy */}
-                      <button
-                        onClick={(e) => handleCopy(e, p, value)}
-                        title="Copy to clipboard"
-                        className={`p-1.5 rounded-lg transition-all flex-shrink-0 ${copied ? 'text-green-400 bg-green-400/10' : 'text-[rgb(var(--muted-fg))] opacity-0 group-hover:opacity-100 hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))]'}`}
-                      >
-                        {copied ? <Check size={13} /> : <Copy size={13} />}
-                      </button>
+                      <span className="font-medium text-sm">{p.name}</span>
+                      <span className="text-xs text-[rgb(var(--muted-fg))] font-mono">#{p.jersey ?? '?'}</span>
+                      {p.position && <span className="text-[10px] px-1.5 py-0.5 bg-[rgb(var(--surface-hover))] rounded text-[rgb(var(--muted-fg))]">{p.position}</span>}
                     </div>
-                  </button>
-                )
-              })}
+                    <div className="text-[10px] text-[rgb(var(--muted-fg))] mt-0.5">{p.totalSets} set{p.totalSets !== 1 ? 's' : ''} played</div>
+                  </div>
+                  <div className="text-base font-bold tabular-nums text-blue-400">{formatValue(p)}</div>
+                </button>
+              ))}
             </div>
           )}
         </div>
