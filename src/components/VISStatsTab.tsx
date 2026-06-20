@@ -44,12 +44,64 @@ import {
   savePlayerStatRow,
   undoLastStat,
   resolveOrCreatePlayer,
+  finalizeMatch,
+  unlockMatch,
+  getMatchLock,
 } from '@/server/stats.functions'
 import {
   Undo2, ArrowUpDown, Save, Loader2, Check,
   ChevronDown, ChevronUp, Users, Zap, RefreshCw,
-  AlertTriangle,
+  AlertTriangle, WifiOff, Wifi, Lock, Unlock,
 } from 'lucide-react'
+import { useAuth } from '@/lib/auth-client'
+
+// ─── Offline queue using localStorage (IndexedDB-compatible fallback) ──────────
+const OFFLINE_QUEUE_KEY = 'rebels_vis_offline_queue'
+
+type OfflineEntry = {
+  id: string
+  matchId: string
+  playerId: number
+  teamId: string
+  setNumber: number
+  field: StatField
+  delta: number
+  timestamp: number
+}
+
+function getOfflineQueue(): OfflineEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) ?? '[]')
+  } catch { return [] }
+}
+
+function addToOfflineQueue(entry: Omit<OfflineEntry, 'id' | 'timestamp'>) {
+  const queue = getOfflineQueue()
+  queue.push({ ...entry, id: Math.random().toString(36).slice(2), timestamp: Date.now() })
+  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue))
+}
+
+function removeFromOfflineQueue(id: string) {
+  const queue = getOfflineQueue().filter(e => e.id !== id)
+  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue))
+}
+
+function clearOfflineQueue() {
+  localStorage.removeItem(OFFLINE_QUEUE_KEY)
+}
+
+// Check network status
+function useOnlineStatus() {
+  const [online, setOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  useEffect(() => {
+    const on = () => setOnline(true)
+    const off = () => setOnline(false)
+    window.addEventListener('online', on)
+    window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
+  return online
+}
 
 type SubTab = 'live' | 'all' | 'attack' | 'serve' | 'reception' | 'block' | 'set' | 'dig' | 'points'
 
@@ -103,11 +155,39 @@ const GROUP_BG: Record<StatGroupKey, string> = {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function VISStatsTab({ state, tournamentId }: { state: TournamentState; tournamentId: string }) {
+  const { user, hasStatAccess, loading: authLoading } = useAuth()
+
   // Guard against undefined state during initial load
   if (!state || !Array.isArray(state.poolMatches) || !Array.isArray(state.teams)) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 size={24} className="animate-spin text-[rgb(var(--muted-fg))]" />
+      </div>
+    )
+  }
+
+  // Auth guard — must be signed in with admin or statistician role
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={24} className="animate-spin text-[rgb(var(--muted-fg))]" />
+      </div>
+    )
+  }
+
+  if (!user || !hasStatAccess) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+        <Lock size={32} className="text-[rgb(var(--muted-fg))] opacity-50" />
+        <div>
+          <p className="font-bold text-lg">Access Restricted</p>
+          <p className="text-sm text-[rgb(var(--muted-fg))] mt-1 max-w-xs">
+            You need to be signed in as a statistician or admin to enter match stats.
+          </p>
+        </div>
+        <a href="/login" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-colors">
+          Sign In
+        </a>
       </div>
     )
   }
@@ -223,8 +303,57 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
     loadStats(false)
   }, [loadStats])
 
-  // ─── 5-second polling for dual-statistician sync ───────────────
+  const online = useOnlineStatus()
+  const [matchLock, setMatchLock] = useState<{ lockedBy: string; lockedAt: Date; notes?: string } | null>(null)
+  const [queueCount, setQueueCount] = useState(0)
+  const [syncing, setSyncing] = useState(false)
+  const syncRef = useRef(false)
+
+  // Refresh queue count
+  const refreshQueueCount = useCallback(() => {
+    setQueueCount(getOfflineQueue().length)
+  }, [])
+
+  useEffect(() => { refreshQueueCount() }, [refreshQueueCount])
+
+  // Check match lock status when match changes
   useEffect(() => {
+    if (!selectedMatchId) { setMatchLock(null); return }
+    getMatchLock({ data: { matchId: selectedMatchId } })
+      .then(lock => setMatchLock(lock ? { lockedBy: lock.lockedBy, lockedAt: new Date(lock.lockedAt), notes: lock.notes ?? undefined } : null))
+      .catch(() => setMatchLock(null))
+  }, [selectedMatchId])
+
+  // Auto-sync when coming back online
+  useEffect(() => {
+    if (!online || syncRef.current) return
+    const queue = getOfflineQueue()
+    if (queue.length === 0) return
+    const sync = async () => {
+      syncRef.current = true
+      setSyncing(true)
+      for (const entry of queue) {
+        try {
+          await upsertPlayerStat({
+            data: {
+              matchId: entry.matchId,
+              playerId: entry.playerId,
+              teamId: entry.teamId,
+              setNumber: entry.setNumber,
+              field: entry.field,
+              delta: entry.delta,
+            }
+          })
+          removeFromOfflineQueue(entry.id)
+        } catch { break }
+      }
+      setSyncing(false)
+      syncRef.current = false
+      refreshQueueCount()
+      await loadStats(false)
+    }
+    sync()
+  }, [online, loadStats, refreshQueueCount])
     if (!selectedMatchId || subTab !== 'live') return
     pollRef.current = setInterval(() => loadStats(true), 5000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
@@ -250,6 +379,7 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
     if (dbPlayerId === undefined) return
     const key = String(dbPlayerId)
 
+    // Optimistic UI update — always immediate
     setStats(prev => {
       const playerSets = { ...prev[key] }
       const current = playerSets[selectedSet] ?? EMPTY_ROW()
@@ -259,6 +389,16 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
       }
       return { ...prev, [key]: playerSets }
     })
+
+    // Block if match is finalized
+    if (matchLock) return
+
+    if (!online) {
+      addToOfflineQueue({ matchId: selectedMatchId, playerId: dbPlayerId, teamId, setNumber: selectedSet, field, delta })
+      refreshQueueCount()
+      setSaveStatus('saved')
+      return
+    }
 
     setSaveStatus('saving')
     try {
@@ -276,9 +416,11 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
       saveTimeoutRef.current = setTimeout(() => setSaveStatus('idle'), 2000)
     } catch {
-      setSaveStatus('error')
+      addToOfflineQueue({ matchId: selectedMatchId, playerId: dbPlayerId, teamId, setNumber: selectedSet, field, delta })
+      refreshQueueCount()
+      setSaveStatus('saved')
     }
-  }, [selectedMatchId, selectedSet, dbPlayerIds, tournamentId])
+  }, [selectedMatchId, selectedSet, dbPlayerIds, tournamentId, online, refreshQueueCount])
 
   const handleUndo = useCallback(async () => {
     if (!selectedMatchId) return
@@ -289,6 +431,7 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
     } catch { /* ignore */ }
     setUndoing(false)
   }, [selectedMatchId, loadStats])
+
 
   const handleSaveAll = useCallback(async () => {
     if (!selectedMatchId) return
@@ -353,7 +496,37 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
 
   return (
     <div className="space-y-4">
-      {/* Match & set selectors */}
+      {/* Match lock banner */}
+      {matchLock && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30">
+          <Lock size={15} className="text-amber-400 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-amber-400">Match Finalized — Read Only</p>
+            <p className="text-xs text-[rgb(var(--muted-fg))]">Locked by {matchLock.lockedBy} · {matchLock.lockedAt.toLocaleString()}{matchLock.notes ? ` · ${matchLock.notes}` : ''}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Offline / sync banner */}
+      {!online && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm font-medium">
+          <WifiOff size={15} />
+          <span>Offline — entries are being saved locally and will sync when reconnected.</span>
+          {queueCount > 0 && <span className="ml-auto text-xs font-bold">{queueCount} queued</span>}
+        </div>
+      )}
+      {online && syncing && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm font-medium">
+          <Loader2 size={15} className="animate-spin" />
+          <span>Syncing offline entries to server...</span>
+        </div>
+      )}
+      {online && !syncing && queueCount > 0 && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-500/10 border border-green-500/30 text-green-400 text-sm font-medium">
+          <Wifi size={15} />
+          <span>Back online — {queueCount} entries synced successfully.</span>
+        </div>
+      )}
       <div className="flex flex-wrap gap-3 items-end">
         <div className="flex-1 min-w-[200px]">
           <label className="text-xs text-[rgb(var(--muted-fg))] mb-1 block">Match</label>
@@ -455,6 +628,7 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
           conflicts={conflicts}
           myTeam={myTeam}
           dbPlayerIds={dbPlayerIds}
+          isLocked={!!matchLock}
         />
       ) : (
         <StatTable
@@ -488,6 +662,7 @@ function LiveEntryPanel({
   onTap: (playerId: string, teamId: string, field: StatField, delta: number) => void
   onUndo: () => void
   undoing: boolean
+  isLocked: boolean
   getStatRow: (playerId: string, setNum: number) => PlayerStatRow
   state: TournamentState
   selectedMatch: any
@@ -500,6 +675,8 @@ function LiveEntryPanel({
   dbPlayerIds: Record<string, number>
 }) {
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null)
+  // Block all tap interactions when match is locked
+  const effectiveOnTap = isLocked ? () => {} : onTap
 
   const teamAPlayers = players.filter(p => p.teamId === selectedMatch?.teamAId)
   const teamBPlayers = players.filter(p => p.teamId === selectedMatch?.teamBId)
@@ -565,6 +742,7 @@ function LiveEntryPanel({
           >
             <Undo2 size={13} /> Undo
           </button>
+
         </div>
       </div>
 
