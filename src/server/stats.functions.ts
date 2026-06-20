@@ -1,73 +1,21 @@
 import { createServerFn } from '@tanstack/react-start'
-import { getCookie, getRequestIP } from '@tanstack/react-start/server'
+import { getRequestIP } from '@tanstack/react-start/server'
 import { db } from '../../db/index.js'
-import { players, playerStats, statUsers, auditLog, tournaments } from '../../db/schema.js'
-import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm'
+import { players, playerStats, auditLog, tournaments } from '../../db/schema.js'
+import { eq, and, desc, gte, sql, inArray } from 'drizzle-orm'
 import { withRetry } from '@/lib/db-retry'
-import crypto from 'crypto'
 import type { StatField } from '@/lib/stats/formulas'
+import { getStatIdentity, requireStatAccess } from '@/lib/auth-server'
 
-// ─── Password hashing (scrypt) ─────────────────────────────────
-
-function hashPw(password: string): string {
-  const salt = crypto.randomBytes(16).toString('hex')
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex')
-  return `${salt}:${hash}`
-}
-
-function verifyPw(password: string, stored: string): boolean {
-  const [salt, hash] = stored.split(':')
-  if (!salt || !hash) return false
-  const test = crypto.scryptSync(password, salt, 64).toString('hex')
-  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(test, 'hex'))
-}
-
-function getJwtSecret(): string {
-  const secret = process.env.STAT_JWT_SECRET
-  if (!secret) throw new Error('STAT_JWT_SECRET is not configured')
-  return secret
-}
-
-function signJwt(payload: { id: string; username: string; role: string }, expiresInSec: number): string {
-  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')
-  const now = Math.floor(Date.now() / 1000)
-  const body = Buffer.from(JSON.stringify({ ...payload, iat: now, exp: now + expiresInSec })).toString('base64url')
-  const secret = getJwtSecret()
-  const sig = crypto.createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url')
-  return `${header}.${body}.${sig}`
-}
-
-function verifyJwt(token: string): { id: string; username: string; role: string } | null {
-  try {
-    const [header, body, sig] = token.split('.')
-    if (!header || !body || !sig) return null
-    const secret = getJwtSecret()
-    const expected = crypto.createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url')
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
-    const payload = JSON.parse(Buffer.from(body, 'base64url').toString())
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
-    return { id: payload.id, username: payload.username, role: payload.role }
-  } catch {
-    return null
-  }
-}
-
-function getStatUserFromCookie(): { id: string; username: string; role: string } | null {
-  const token = getCookie('stat_access')
-  if (!token) return null
-  return verifyJwt(token)
-}
+// ─── Helpers ────────────────────────────────────────────────────
 
 function getClientIp(): string | null {
-  try {
-    return getRequestIP({ xForwardedFor: true }) ?? null
-  } catch {
-    return null
-  }
+  try { return getRequestIP() ?? null } catch { return null }
 }
 
 async function insertAudit(data: {
-  statUserId?: string | null
+  netlifyUserId?: string | null
+  netlifyEmail?: string | null
   username: string
   userRole: string
   action: string
@@ -80,7 +28,7 @@ async function insertAudit(data: {
   ipAddress?: string | null
 }) {
   await db.insert(auditLog).values({
-    statUserId: data.statUserId ?? null,
+    statUserId: null,
     username: data.username,
     userRole: data.userRole,
     action: data.action,
@@ -91,285 +39,8 @@ async function insertAudit(data: {
     oldValue: data.oldValue ?? null,
     newValue: data.newValue ?? null,
     ipAddress: data.ipAddress ?? null,
-  })
+  }).catch(() => { /* audit failure should not block stat entry */ })
 }
-
-// ─── Password validation ────────────────────────────────────────
-
-const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*]).{8,}$/
-
-// ─── Hardcoded fallback account ─────────────────────────────────
-
-const HARDCODED_ACCOUNT = {
-  username: process.env.STAT_FALLBACK_USERNAME || 'stats@rebels.com',
-  password: process.env.STAT_FALLBACK_PASSWORD || '',
-  role: 'statistician' as const,
-}
-
-// ─── Auth Server Functions ──────────────────────────────────────
-
-export const loginStatUser = createServerFn({ method: 'POST' })
-  .inputValidator((data: { username: string; password: string }) => data)
-  .handler(async ({ data }) => {
-    const ip = getClientIp()
-    return withRetry(async () => {
-      // Hardcoded fallback account — auto-provisions in DB on first use.
-      // Disabled unless STAT_FALLBACK_PASSWORD is configured.
-      if (HARDCODED_ACCOUNT.password && data.username === HARDCODED_ACCOUNT.username && data.password === HARDCODED_ACCOUNT.password) {
-        let [user] = await db.select().from(statUsers).where(eq(statUsers.username, HARDCODED_ACCOUNT.username)).limit(1)
-        if (!user) {
-          const [created] = await db.insert(statUsers).values({
-            username: HARDCODED_ACCOUNT.username,
-            passwordHash: hashPw(HARDCODED_ACCOUNT.password),
-            role: HARDCODED_ACCOUNT.role,
-            mustChangePassword: false,
-            isActive: true,
-            failedLoginCount: 0,
-          }).returning()
-          user = created
-        }
-
-        if (!user.isActive) throw new Error('Account disabled')
-
-        await db.update(statUsers).set({
-          failedLoginCount: 0,
-          lockoutUntil: null,
-          lastLoginAt: new Date(),
-          updatedAt: new Date(),
-        }).where(eq(statUsers.id, user.id))
-
-        const accessToken = signJwt({ id: user.id, username: user.username, role: user.role }, 15 * 60)
-        const refreshToken = signJwt({ id: user.id, username: user.username, role: user.role }, 7 * 24 * 60 * 60)
-
-        await insertAudit({
-          statUserId: user.id,
-          username: user.username,
-          userRole: user.role,
-          action: 'LOGIN',
-          ipAddress: ip,
-        })
-
-        return {
-          user: { id: user.id, username: user.username, role: user.role, mustChangePassword: false },
-          accessToken,
-          refreshToken,
-        }
-      }
-
-      const [user] = await db.select().from(statUsers).where(eq(statUsers.username, data.username)).limit(1)
-      if (!user) throw new Error('Invalid credentials')
-      if (!user.isActive) throw new Error('Account disabled')
-
-      if (user.lockoutUntil && user.lockoutUntil > new Date()) {
-        const remaining = Math.ceil((user.lockoutUntil.getTime() - Date.now()) / 60000)
-        throw new Error(`Account locked. Try again in ${remaining} minutes.`)
-      }
-
-      if (!verifyPw(data.password, user.passwordHash)) {
-        const newCount = user.failedLoginCount + 1
-        const updates: any = { failedLoginCount: newCount, updatedAt: new Date() }
-        if (newCount >= 5) {
-          updates.lockoutUntil = new Date(Date.now() + 30 * 60 * 1000)
-          await insertAudit({
-            statUserId: user.id,
-            username: user.username,
-            userRole: user.role,
-            action: 'ACCOUNT_LOCK',
-            ipAddress: ip,
-          })
-        }
-        await db.update(statUsers).set(updates).where(eq(statUsers.id, user.id))
-        throw new Error('Invalid credentials')
-      }
-
-      await db.update(statUsers).set({
-        failedLoginCount: 0,
-        lockoutUntil: null,
-        lastLoginAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(statUsers.id, user.id))
-
-      const accessToken = signJwt({ id: user.id, username: user.username, role: user.role }, 15 * 60)
-      const refreshToken = signJwt({ id: user.id, username: user.username, role: user.role }, 7 * 24 * 60 * 60)
-
-      await insertAudit({
-        statUserId: user.id,
-        username: user.username,
-        userRole: user.role,
-        action: 'LOGIN',
-        ipAddress: ip,
-      })
-
-      return {
-        user: { id: user.id, username: user.username, role: user.role, mustChangePassword: user.mustChangePassword },
-        accessToken,
-        refreshToken,
-      }
-    })
-  })
-
-export const logoutStatUser = createServerFn({ method: 'POST' })
-  .handler(async () => {
-    const statUser = getStatUserFromCookie()
-    if (statUser) {
-      await withRetry(() =>
-        insertAudit({
-          statUserId: statUser.id,
-          username: statUser.username,
-          userRole: statUser.role,
-          action: 'LOGOUT',
-        })
-      )
-    }
-    return { ok: true }
-  })
-
-export const changePassword = createServerFn({ method: 'POST' })
-  .inputValidator((data: { current: string; newPassword: string }) => data)
-  .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
-    if (!statUser) throw new Error('Not authenticated')
-
-    if (!PASSWORD_REGEX.test(data.newPassword)) {
-      throw new Error('Password must be 8+ chars with uppercase, digit, and special character (!@#$%^&*)')
-    }
-
-    const ip = getClientIp()
-    return withRetry(async () => {
-      const [user] = await db.select().from(statUsers).where(eq(statUsers.id, statUser.id))
-      if (!user) throw new Error('User not found')
-      if (!verifyPw(data.current, user.passwordHash)) throw new Error('Current password incorrect')
-
-      await db.update(statUsers).set({
-        passwordHash: hashPw(data.newPassword),
-        mustChangePassword: false,
-        updatedAt: new Date(),
-      }).where(eq(statUsers.id, user.id))
-
-      await insertAudit({
-        statUserId: user.id,
-        username: user.username,
-        userRole: user.role,
-        action: 'PASSWORD_RESET',
-        ipAddress: ip,
-      })
-
-      return { ok: true }
-    })
-  })
-
-export const createStatUser = createServerFn({ method: 'POST' })
-  .inputValidator((data: { username: string; tempPassword: string; role: string }) => data)
-  .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
-    if (!statUser || statUser.role !== 'admin') throw new Error('Admin access required')
-
-    const ip = getClientIp()
-    return withRetry(async () => {
-      const [newUser] = await db.insert(statUsers).values({
-        username: data.username,
-        passwordHash: hashPw(data.tempPassword),
-        role: data.role,
-        mustChangePassword: true,
-        createdBy: statUser.id,
-      }).returning()
-
-      await insertAudit({
-        statUserId: statUser.id,
-        username: statUser.username,
-        userRole: statUser.role,
-        action: 'USER_CREATE',
-        entityType: 'stat_user',
-        entityId: newUser.id,
-        ipAddress: ip,
-      })
-
-      return { id: newUser.id, username: newUser.username, role: newUser.role }
-    })
-  })
-
-export const resetStatUserPassword = createServerFn({ method: 'POST' })
-  .inputValidator((data: { userId: string; tempPassword: string }) => data)
-  .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
-    if (!statUser || statUser.role !== 'admin') throw new Error('Admin access required')
-
-    const ip = getClientIp()
-    return withRetry(async () => {
-      await db.update(statUsers).set({
-        passwordHash: hashPw(data.tempPassword),
-        mustChangePassword: true,
-        failedLoginCount: 0,
-        lockoutUntil: null,
-        updatedAt: new Date(),
-      }).where(eq(statUsers.id, data.userId))
-
-      await insertAudit({
-        statUserId: statUser.id,
-        username: statUser.username,
-        userRole: statUser.role,
-        action: 'PASSWORD_RESET',
-        entityType: 'stat_user',
-        entityId: data.userId,
-        ipAddress: ip,
-      })
-
-      return { ok: true }
-    })
-  })
-
-export const listStatUsers = createServerFn({ method: 'GET' })
-  .handler(async () => {
-    const statUser = getStatUserFromCookie()
-    if (!statUser || statUser.role !== 'admin') throw new Error('Admin access required')
-
-    return withRetry(async () => {
-      return db.select({
-        id: statUsers.id,
-        username: statUsers.username,
-        role: statUsers.role,
-        isActive: statUsers.isActive,
-        mustChangePassword: statUsers.mustChangePassword,
-        lastLoginAt: statUsers.lastLoginAt,
-        lockoutUntil: statUsers.lockoutUntil,
-        failedLoginCount: statUsers.failedLoginCount,
-        createdAt: statUsers.createdAt,
-      }).from(statUsers).orderBy(desc(statUsers.createdAt))
-    })
-  })
-
-export const toggleStatUserActive = createServerFn({ method: 'POST' })
-  .inputValidator((data: { userId: string; isActive: boolean }) => data)
-  .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
-    if (!statUser || statUser.role !== 'admin') throw new Error('Admin access required')
-    if (statUser.id === data.userId) throw new Error('Cannot modify your own account')
-
-    const ip = getClientIp()
-    return withRetry(async () => {
-      await db.update(statUsers).set({
-        isActive: data.isActive,
-        updatedAt: new Date(),
-      }).where(eq(statUsers.id, data.userId))
-
-      await insertAudit({
-        statUserId: statUser.id,
-        username: statUser.username,
-        userRole: statUser.role,
-        action: 'USER_UPDATE',
-        entityType: 'stat_user',
-        entityId: data.userId,
-        fieldName: 'is_active',
-        oldValue: String(!data.isActive),
-        newValue: String(data.isActive),
-        ipAddress: ip,
-      })
-
-      return { ok: true }
-    })
-  })
-
-// ─── Stat CRUD ──────────────────────────────────────────────────
 
 export const getPlayerStats = createServerFn({ method: 'POST' })
   .inputValidator((data: { matchId: string; teamId?: string; setNumber?: number }) => data)
@@ -408,7 +79,7 @@ export const upsertPlayerStat = createServerFn({ method: 'POST' })
     field: string; delta: number
   }) => data)
   .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
+    const identity = await getStatIdentity()
     const ip = getClientIp()
 
     return withRetry(async () => {
@@ -471,9 +142,8 @@ export const upsertPlayerStat = createServerFn({ method: 'POST' })
       const newVal = String((row as any)[fieldKey] ?? 0)
 
       await insertAudit({
-        statUserId: statUser?.id ?? null,
-        username: statUser?.username ?? 'anonymous',
-        userRole: statUser?.role ?? 'viewer',
+        username: identity?.email ?? 'anonymous',
+        userRole: identity?.role ?? 'viewer',
         action,
         entityType: 'player_stat',
         entityId: row.id,
@@ -497,7 +167,7 @@ export const savePlayerStatRow = createServerFn({ method: 'POST' })
     row: Record<string, number>
   }) => data)
   .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
+    const identity = await getStatIdentity()
     const ip = getClientIp()
 
     return withRetry(async () => {
@@ -529,9 +199,8 @@ export const savePlayerStatRow = createServerFn({ method: 'POST' })
       // Distinct action so undoLastStat (which targets STAT_CREATE/STAT_UPDATE) ignores
       // bulk re-syncs and keeps undoing the individual taps.
       await insertAudit({
-        statUserId: statUser?.id ?? null,
-        username: statUser?.username ?? 'anonymous',
-        userRole: statUser?.role ?? 'viewer',
+        username: identity?.email ?? 'anonymous',
+        userRole: identity?.role ?? 'viewer',
         action: 'STAT_SAVE_ALL',
         entityType: 'player_stat',
         matchId: data.matchId,
@@ -545,7 +214,7 @@ export const savePlayerStatRow = createServerFn({ method: 'POST' })
 export const undoLastStat = createServerFn({ method: 'POST' })
   .inputValidator((data: { matchId: string }) => data)
   .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
+    const identity = await getStatIdentity()
     const ip = getClientIp()
 
     return withRetry(async () => {
@@ -576,9 +245,8 @@ export const undoLastStat = createServerFn({ method: 'POST' })
       }).where(eq(playerStats.id, lastEntry.entityId))
 
       await insertAudit({
-        statUserId: statUser?.id ?? null,
-        username: statUser?.username ?? 'anonymous',
-        userRole: statUser?.role ?? 'viewer',
+        username: identity?.email ?? 'anonymous',
+        userRole: identity?.role ?? 'viewer',
         action: 'STAT_UNDO',
         entityType: 'player_stat',
         entityId: lastEntry.entityId,
@@ -598,7 +266,7 @@ export const undoLastStat = createServerFn({ method: 'POST' })
 export const updatePlayerJersey = createServerFn({ method: 'POST' })
   .inputValidator((data: { playerId: number; jerseyNumber: number | null }) => data)
   .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
+    const identity = await getStatIdentity()
     const ip = getClientIp()
 
     return withRetry(async () => {
@@ -613,9 +281,10 @@ export const updatePlayerJersey = createServerFn({ method: 'POST' })
       }).where(eq(players.id, data.playerId))
 
       await insertAudit({
-        statUserId: statUser?.id ?? null,
-        username: statUser?.username ?? 'admin',
-        userRole: statUser?.role ?? 'admin',
+        netlifyUserId: identity?.userId ?? null,
+        netlifyEmail: identity?.email ?? null,
+        username: identity?.email ?? "unknown" ?? 'admin',
+        userRole: identity?.role ?? "viewer" ?? 'admin',
         action: 'ROSTER_UPDATE',
         entityType: 'player',
         entityId: String(data.playerId),
@@ -632,7 +301,7 @@ export const updatePlayerJersey = createServerFn({ method: 'POST' })
 export const importPlayers = createServerFn({ method: 'POST' })
   .inputValidator((data: { teamId: string; rows: { jerseyNumber: number; name: string; position: string }[] }) => data)
   .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
+    const identity = await getStatIdentity()
     const ip = getClientIp()
 
     return withRetry(async () => {
@@ -663,9 +332,10 @@ export const importPlayers = createServerFn({ method: 'POST' })
       }
 
       await insertAudit({
-        statUserId: statUser?.id ?? null,
-        username: statUser?.username ?? 'admin',
-        userRole: statUser?.role ?? 'admin',
+        netlifyUserId: identity?.userId ?? null,
+        netlifyEmail: identity?.email ?? null,
+        username: identity?.email ?? "unknown" ?? 'admin',
+        userRole: identity?.role ?? "viewer" ?? 'admin',
         action: 'ROSTER_UPDATE',
         entityType: 'import',
         newValue: JSON.stringify({ count: results.length, teamId: data.teamId }),
@@ -684,8 +354,8 @@ export const getAuditLog = createServerFn({ method: 'POST' })
     from?: string; to?: string; page?: number; pageSize?: number
   }) => data)
   .handler(async ({ data }) => {
-    const statUser = getStatUserFromCookie()
-    if (!statUser || statUser.role !== 'admin') throw new Error('Admin access required')
+    const identity = await getStatIdentity()
+    if (!identity || identity.role !== 'admin') throw new Error('Admin access required')
 
     return withRetry(async () => {
       const page = data.page ?? 1
@@ -756,20 +426,4 @@ export const getAllPlayerStats = createServerFn({ method: 'GET' })
     })
   })
 
-// ─── Get current stat user from token ───────────────────────────
-
-export const getCurrentStatUser = createServerFn({ method: 'GET' })
-  .handler(async () => {
-    const statUser = getStatUserFromCookie()
-    if (!statUser) return null
-    return withRetry(async () => {
-      const [user] = await db.select({
-        id: statUsers.id,
-        username: statUsers.username,
-        role: statUsers.role,
-        isActive: statUsers.isActive,
-        mustChangePassword: statUsers.mustChangePassword,
-      }).from(statUsers).where(eq(statUsers.id, statUser.id))
-      return user ?? null
-    })
-  })
+// getCurrentStatUser removed — use Netlify Identity getUser() directly
