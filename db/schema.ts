@@ -208,6 +208,11 @@ export const playerStats = pgTable('player_stats', {
   digError: integer('dig_error').notNull().default(0),
   digAttempt: integer('dig_attempt').notNull().default(0),
   receiveAttempt: integer('receive_attempt').notNull().default(0),
+  freeballDig: integer('freeball_dig').notNull().default(0),
+  freeballError: integer('freeball_error').notNull().default(0),
+  opponentId: varchar('opponent_id', { length: 100 }),
+  matchDate: text('match_date'),
+  matchVenue: text('match_venue'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
@@ -225,5 +230,9 @@ export const auditLog = pgTable('audit_log', {
   oldValue: text('old_value'),
   newValue: text('new_value'),
   ipAddress: varchar('ip_address', { length: 45 }),
+  flagged: boolean('flagged').notNull().default(false),
+  flagNote: text('flag_note'),
+  netlifyUserId: text('netlify_user_id'),
+  netlifyEmail: text('netlify_email'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 })
