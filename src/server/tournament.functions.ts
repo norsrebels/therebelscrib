@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { db } from "../../db/index.js";
 import { tournaments, playerStats } from "../../db/schema.js";
-import { eq } from "drizzle-orm";
+import { eq, sql, inArray } from "drizzle-orm";
 import { withRetry } from "@/lib/db-retry";
 import { getAdminUser } from "@/lib/auth-server";
 
@@ -12,11 +12,33 @@ export const getTournaments = createServerFn({ method: "GET" }).handler(
         .select()
         .from(tournaments)
         .orderBy(tournaments.createdAt);
+
+      // Get match counts per tournament from player_stats
+      // matchesPlayed = distinct matchIds that have at least one stat entry
+      // matchesTotal = stored in tournament state JSON (not in DB), so we approximate
+      // by counting distinct matchIds linked to each tournament via teamId
+      const tournamentIds = rows.map(r => r.externalId);
+      let matchCounts: Record<string, number> = {};
+
+      if (tournamentIds.length > 0) {
+        const countRows = await db.execute(sql`
+          SELECT team_id, COUNT(DISTINCT match_id) as match_count
+          FROM player_stats
+          WHERE team_id = ANY(${sql.raw("ARRAY['" + tournamentIds.join("','") + "']")})
+          GROUP BY team_id
+        `);
+        for (const row of countRows.rows as any[]) {
+          matchCounts[row.team_id] = Number(row.match_count);
+        }
+      }
+
       return rows.map((r) => ({
         id: r.externalId,
         name: r.name,
         archived: r.archived,
         createdAt: r.createdAt?.getTime() ?? Date.now(),
+        matchesPlayed: matchCounts[r.externalId] ?? 0,
+        matchesTotal: 0, // populated client-side from tournament state
       }));
     });
   },
