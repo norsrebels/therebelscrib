@@ -163,6 +163,16 @@ function VisStatsPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       {toasts.map(t => <ToastBar key={t.id} message={t.message} type={t.type} onClose={() => removeToast(t.id)} />)}
+      {/* Deprecation notice */}
+      <div className="flex items-start gap-3 px-4 py-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 mb-6">
+        <AlertTriangle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-bold text-amber-400">Legacy System — Use New VIS Stats</p>
+          <p className="text-sm text-[rgb(var(--muted-fg))] mt-0.5">
+            This page is being phased out. All new stat entry should be done via <strong>Tournaments → your tournament → VIS Stats tab</strong>. Existing matches below are preserved for reference only.
+          </p>
+        </div>
+      </div>
 
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
