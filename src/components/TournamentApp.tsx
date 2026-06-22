@@ -42,8 +42,6 @@ import {
   Plus,
   X,
   Link2,
-  Moon,
-  Sun,
   MapPin,
   Clock,
   Facebook,
@@ -1580,10 +1578,12 @@ function LeaderboardTab({ state }: { state: TournamentState }) {
     );
   }
 
+  const singlePool = (sA.length > 0) !== (sB.length > 0);
+
   return (
-    <div>
-      {sA.length > 0 && renderTable(sA, "Pool A Standings")}
-      {sB.length > 0 && renderTable(sB, "Pool B Standings")}
+    <div className={singlePool ? "max-w-2xl" : ""}>
+      {sA.length > 0 && renderTable(sA, singlePool ? "Standings" : "Pool A Standings")}
+      {sB.length > 0 && renderTable(sB, singlePool ? "Standings" : "Pool B Standings")}
     </div>
   );
 }
@@ -1900,6 +1900,30 @@ function LiveView({
   const totalMatches = liveCards.length;
   const playedMatches = completedCards.length + ongoingCards.length;
 
+  // Tournament completion — champion detection from the final playoff game
+  const allComplete = totalMatches > 0 && completedCards.length === totalMatches;
+  const championInfo = useMemo(() => {
+    if (!allComplete) return null;
+    // The championship is the last playoff card (highest phase). Find the final.
+    const playoffCards = liveCards.filter((c) => c.type === "playoff");
+    if (playoffCards.length === 0) {
+      // Pool-only tournament — champion is the top of combined standings
+      const allStandings = [...standingsA, ...standingsB].sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        return (b.pointsFor - b.pointsAgainst) - (a.pointsFor - a.pointsAgainst);
+      });
+      const top = allStandings[0];
+      if (!top) return null;
+      return { champion: top.team.name, runnerUp: allStandings[1]?.team.name ?? null, type: "pool" as const };
+    }
+    // Find the final game (last in playoff order)
+    const finalGame = playoffCards[playoffCards.length - 1];
+    if (!finalGame || finalGame.scoreA === null || finalGame.scoreB === null) return null;
+    const champion = finalGame.scoreA > finalGame.scoreB ? finalGame.teamAName : finalGame.teamBName;
+    const runnerUp = finalGame.scoreA > finalGame.scoreB ? finalGame.teamBName : finalGame.teamAName;
+    return { champion, runnerUp, type: "playoff" as const };
+  }, [allComplete, liveCards, standingsA, standingsB]);
+
   // Team follow filter
   const allTeamNames = [...new Set(liveCards.flatMap((c) => [c.teamAName, c.teamBName]).filter((n) => n !== "TBD"))].sort();
 
@@ -2134,7 +2158,30 @@ function LiveView({
         )}
       </div>
 
-      {/* Court map — when 2+ games ongoing */}
+      {/* Tournament Completion Summary — champion celebration */}
+      {allComplete && championInfo && (
+        <div className="glass border-2 border-amber-500/30 rounded-2xl p-6 text-center relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-b from-amber-500/10 to-transparent pointer-events-none" />
+          <div className="relative">
+            <div className="w-14 h-14 rounded-full bg-amber-500/15 flex items-center justify-center mx-auto mb-3">
+              <Trophy size={28} className="text-amber-400" />
+            </div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80 mb-1">
+              Tournament Complete
+            </p>
+            <h2 className="text-2xl font-bold text-[rgb(var(--fg))]">{championInfo.champion}</h2>
+            <p className="text-sm text-[rgb(var(--muted-fg))] mt-1">Champion 🏆</p>
+            {championInfo.runnerUp && (
+              <p className="text-xs text-[rgb(var(--muted-fg))] mt-3">
+                Runner-up: <span className="font-medium text-[rgb(var(--fg))]">{championInfo.runnerUp}</span>
+              </p>
+            )}
+            <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-3">
+              All {totalMatches} matches completed
+            </p>
+          </div>
+        </div>
+      )}
       {ongoingCards.length > 1 && (
         <div className="glass border border-[rgb(var(--border-soft))] rounded-xl p-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-[rgb(var(--muted-fg))] mb-2">Courts Active Now</p>
@@ -2217,12 +2264,16 @@ function LiveView({
       )}
 
       {/* Standings — always visible */}
-      {(standingsA.length > 0 || standingsB.length > 0) && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {standingsA.length > 0 && renderLiveStandings(standingsA, "Pool A Standings")}
-          {standingsB.length > 0 && renderLiveStandings(standingsB, "Pool B Standings")}
-        </div>
-      )}
+      {(standingsA.length > 0 || standingsB.length > 0) && (() => {
+        const bothPools = standingsA.length > 0 && standingsB.length > 0;
+        const onePool = !bothPools;
+        return (
+          <div className={bothPools ? "grid grid-cols-1 gap-4 lg:grid-cols-2" : "max-w-2xl"}>
+            {standingsA.length > 0 && renderLiveStandings(standingsA, onePool ? "Standings" : "Pool A Standings")}
+            {standingsB.length > 0 && renderLiveStandings(standingsB, onePool ? "Standings" : "Pool B Standings")}
+          </div>
+        );
+      })()}
 
       {/* Active games list (pending + next, no done) */}
       {filteredActiveCards.filter((c) => c.status !== "ongoing").length === 0 && filter !== "ongoing" ? (
@@ -2583,8 +2634,8 @@ export default function TournamentApp({
   const [state, setStateRaw] = useState<TournamentState>(defaultState);
   const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<
-    "teams" | "matches" | "leaderboard" | "vis stats" | "settings"
-  >("teams");
+    "Teams" | "Matches" | "Standings" | "VIS Stats" | "Settings"
+  >("Teams");
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -2693,13 +2744,6 @@ export default function TournamentApp({
       </div>
     );
 
-  const toggleTheme = () => {
-    const nextTheme = theme === "dark" ? "light" : "dark";
-    setTheme(nextTheme);
-    document.documentElement.setAttribute("data-theme", nextTheme);
-    localStorage.setItem("tr_theme", nextTheme);
-  };
-
   const copyLiveLink = () => {
     navigator.clipboard.writeText(
       `${window.location.origin}/live/${encodeURIComponent(tournamentId)}`,
@@ -2722,8 +2766,14 @@ export default function TournamentApp({
         </div>
       )}
       {syncError && (
-        <div className="bg-amber-600/90 text-white text-xs text-center py-2 px-4">
-          {syncError}
+        <div className="bg-amber-600/90 text-white text-xs py-2 px-4 flex items-center justify-center gap-3">
+          <span>{syncError}</span>
+          <button
+            onClick={() => setState({ ...state })}
+            className="underline font-bold hover:no-underline flex-shrink-0"
+          >
+            Retry
+          </button>
         </div>
       )}
       <div className="glass border-b border-[rgb(var(--border))] py-3 px-4 sm:px-6 flex flex-col lg:flex-row gap-4 lg:items-center justify-between text-xs font-bold tracking-normal ">
@@ -2762,13 +2812,6 @@ export default function TournamentApp({
           >
             Gallery
           </Link>
-          <button
-            onClick={toggleTheme}
-            className="flex items-center gap-1 border border-[rgb(var(--border-soft))] text-[rgb(var(--fg))] px-3 py-1.5 rounded"
-          >
-            {theme === "dark" ? <Sun size={12} /> : <Moon size={12} />}
-            {theme === "dark" ? "Light" : "Dark"}
-          </button>
           {!lockView && (
             <button
               onClick={copyLiveLink}
@@ -2788,11 +2831,11 @@ export default function TournamentApp({
             <div className="flex gap-1 mb-6 glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-1.5 overflow-x-auto">
               {(
                 [
-                  "teams",
-                  "matches",
-                  "leaderboard",
-                  "vis stats",
-                  "settings",
+                  "Teams",
+                  "Matches",
+                  "Standings",
+                  "VIS Stats",
+                  "Settings",
                 ] as const
               ).map((t) => (
                 <button
@@ -2810,13 +2853,13 @@ export default function TournamentApp({
               ))}
             </div>
 
-            {tab === "teams" && <TeamsTab state={state} setState={setState} />}
-            {tab === "matches" && (
+            {tab === "Teams" && <TeamsTab state={state} setState={setState} />}
+            {tab === "Matches" && (
               <MatchesTab state={state} setState={setState} tournamentId={tournamentId} />
             )}
-            {tab === "leaderboard" && <LeaderboardTab state={state} />}
-            {tab === "vis stats" && <VISStatsTab state={state} tournamentId={tournamentId} />}
-            {tab === "settings" && (
+            {tab === "Standings" && <LeaderboardTab state={state} />}
+            {tab === "VIS Stats" && <VISStatsTab state={state} tournamentId={tournamentId} />}
+            {tab === "Settings" && (
               <SettingsTab state={state} setState={setState} />
             )}
           </>
