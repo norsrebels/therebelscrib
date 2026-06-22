@@ -7,7 +7,31 @@ import {
   type TournamentState,
   defaultState,
 } from "@/lib/tournament";
-import { Maximize, Minimize, Plus, Minus } from "lucide-react";
+import { Maximize, Minimize, Plus, Minus, QrCode } from "lucide-react";
+
+// Lightweight QR code via Google Charts API — no npm needed
+function QRCodeDisplay({ url, size = 120 }: { url: string; size?: number }) {
+  const [show, setShow] = useState(false);
+  const encodedUrl = encodeURIComponent(url);
+  const chartUrl = `https://chart.googleapis.com/chart?cht=qr&chs=${size}x${size}&chl=${encodedUrl}&choe=UTF-8`;
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setShow(v => !v)}
+        className="p-[1vh] rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-colors flex items-center gap-1.5 text-[1.6vh]"
+        title="Show QR code for live view"
+      >
+        <QrCode size={18} />
+      </button>
+      {show && (
+        <div className="absolute right-0 top-full mt-2 bg-white rounded-xl p-3 shadow-2xl z-50 flex flex-col items-center gap-2">
+          <img src={chartUrl} alt="QR Code" width={size} height={size} className="rounded" />
+          <p className="text-[10px] text-zinc-600 text-center max-w-[120px] break-all">{url}</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export const Route = createFileRoute("/scoreboard/$tournamentId" as any)({
   component: ScoreboardPage,
@@ -191,6 +215,8 @@ function ScoreboardPage() {
           </span>
         </div>
         <div className="flex items-center gap-[1.5vw]">
+          {/* QR code for live view */}
+          <QRCodeDisplay url={`${window.location.origin}/live/${encodeURIComponent(tournamentId)}`} size={140} />
           {/* Game selector */}
           <select
             className="bg-zinc-800 border border-zinc-600 rounded-lg px-[1vw] py-[0.5vh] text-[1.8vh] font-medium"
