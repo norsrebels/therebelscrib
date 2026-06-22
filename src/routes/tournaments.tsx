@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Calendar,
   Plus,
@@ -13,6 +13,11 @@ import {
   LogIn,
   Monitor,
   Trash2,
+  Search,
+  X,
+  CheckCircle2,
+  PlayCircle,
+  Circle,
 } from "lucide-react";
 import TournamentApp from "@/components/TournamentApp";
 import { useAuth } from "@/lib/auth-client";
@@ -32,6 +37,25 @@ interface ScheduleItem {
   name: string;
   archived: boolean;
   createdAt: number;
+  matchesPlayed?: number;
+  matchesTotal?: number;
+}
+
+// Derive tournament status from match counts
+function getTournamentStatus(s: ScheduleItem): {
+  label: string;
+  color: string;
+  icon: React.ReactNode;
+} {
+  const played = s.matchesPlayed ?? 0;
+  const total = s.matchesTotal ?? 0;
+  if (total === 0 || played === 0) {
+    return { label: "Upcoming", color: "text-zinc-400 bg-zinc-500/10 border-zinc-500/20", icon: <Circle size={11} /> };
+  }
+  if (played >= total) {
+    return { label: "Completed", color: "text-green-400 bg-green-500/10 border-green-500/20", icon: <CheckCircle2 size={11} /> };
+  }
+  return { label: "Ongoing", color: "text-amber-400 bg-amber-500/10 border-amber-500/20", icon: <PlayCircle size={11} /> };
 }
 
 export const Route = createFileRoute("/tournaments")({
@@ -52,6 +76,7 @@ function TournamentsPage() {
   const [schedules, setSchedules] = useState<ScheduleItem[]>(loaderData.schedules);
   const [showArchived, setShowArchived] = useState(false);
   const [sortBy, setSortBy] = useState<"date" | "name">("date");
+  const [searchQuery, setSearchQuery] = useState("");
   const { isAdmin, loading: authLoading } = useAuth();
   const { toast, showToast } = useToast();
   const { setLoading } = useLoading();
@@ -166,6 +191,8 @@ function TournamentsPage() {
 
   const filteredSchedules = schedules.filter((s) =>
     showArchived ? s.archived : !s.archived,
+  ).filter((s) =>
+    searchQuery.trim() === "" || s.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
   const sortedSchedules = [...filteredSchedules].sort((a, b) => {
     if (sortBy === "name") return a.name.localeCompare(b.name);
@@ -274,7 +301,25 @@ function TournamentsPage() {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Search bar */}
+          {schedules.length > 2 && (
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))]" />
+              <input
+                type="text"
+                placeholder="Search schedules..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8 pr-8 py-2 rounded-full text-sm bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] focus:outline-none focus:border-blue-500 w-48"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          )}
           {schedules.some((s) => s.archived) && (
             <button
               onClick={() => setShowArchived(!showArchived)}
@@ -336,13 +381,37 @@ function TournamentsPage() {
             >
               <div className="flex-1">
                 <div className="flex items-start justify-between gap-3 mb-4">
-                  <div>
-                    <h3 className="text-lg font-semibold tracking-tight line-clamp-2">
-                      {s.name}
-                    </h3>
-                    <p className="text-[13px] text-[rgb(var(--muted-fg))] mt-1">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <h3 className="text-lg font-semibold tracking-tight line-clamp-2">
+                        {s.name}
+                      </h3>
+                      {/* Status badge */}
+                      {(() => {
+                        const status = getTournamentStatus(s);
+                        return (
+                          <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${status.color}`}>
+                            {status.icon} {status.label}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <p className="text-[13px] text-[rgb(var(--muted-fg))]">
                       ID: {s.id}
                     </p>
+                    {/* Match count summary */}
+                    {(s.matchesTotal ?? 0) > 0 && (
+                      <p className="text-[12px] text-[rgb(var(--muted-fg))] mt-1 flex items-center gap-1.5">
+                        <span className="font-semibold text-[rgb(var(--fg))]">{s.matchesPlayed ?? 0}</span>
+                        <span>/ {s.matchesTotal} matches played</span>
+                        <span className="ml-1 h-1.5 rounded-full bg-[rgb(var(--surface-hover))] flex-1 max-w-[60px] overflow-hidden">
+                          <span
+                            className="block h-full bg-blue-500 rounded-full transition-all"
+                            style={{ width: `${Math.round(((s.matchesPlayed ?? 0) / (s.matchesTotal ?? 1)) * 100)}%` }}
+                          />
+                        </span>
+                      </p>
+                    )}
                   </div>
                   {isAdmin && (
                     <div className="flex items-center gap-1">
