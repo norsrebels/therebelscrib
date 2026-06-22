@@ -34,6 +34,7 @@ import {
   updateAlbum,
 } from "../server/album.functions";
 import { getAllSiteSettings } from "../server/site-settings.functions";
+import { PhotoEngagement } from "@/components/PhotoEngagement";
 import { useAuth } from "@/lib/auth-client";
 import { ConfirmationModal, ToastBar } from "@/components/Modals";
 import { useToast } from "@/lib/use-toast";
@@ -923,6 +924,10 @@ function GalleryPage() {
                   </button>
                 )}
               </div>
+              {/* Member engagement — reactions + comments */}
+              {GALLERY_DATA[lightboxIndex].id && (
+                <PhotoEngagement imageId={GALLERY_DATA[lightboxIndex].id!} />
+              )}
             </div>
           </div>
           <button
