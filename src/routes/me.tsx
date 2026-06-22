@@ -7,9 +7,9 @@ import { useAuth, getUserDisplayName } from '@/lib/auth-client'
 import { getMyActivity } from '@/server/member.functions'
 import {
   Loader2, Star, Trophy, Image, Users, LogOut,
-  CheckCircle2, XCircle, ArrowLeft,
+  CheckCircle2, XCircle, ArrowLeft, KeyRound, Check,
 } from 'lucide-react'
-import { logout } from '@netlify/identity'
+import { logout, updateUser } from '@netlify/identity'
 
 export const Route = createFileRoute('/me')({
   component: MePage,
@@ -40,6 +40,11 @@ function MePage() {
   const { user, isMember, isAdmin, loading } = useAuth()
   const [activity, setActivity] = useState<any>(null)
   const [activityLoading, setActivityLoading] = useState(false)
+  const [showPwChange, setShowPwChange] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [pwChanging, setPwChanging] = useState(false)
+  const [pwMessage, setPwMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   useEffect(() => {
     if (!loading && !user) {
@@ -59,6 +64,31 @@ function MePage() {
   const handleSignOut = async () => {
     try { await logout() } catch { /* ignore */ }
     window.location.href = '/'
+  }
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPwMessage(null)
+    if (newPassword !== confirmPassword) {
+      setPwMessage({ type: 'error', text: 'Passwords do not match.' })
+      return
+    }
+    if (newPassword.length < 6) {
+      setPwMessage({ type: 'error', text: 'Password must be at least 6 characters.' })
+      return
+    }
+    setPwChanging(true)
+    try {
+      await updateUser({ password: newPassword })
+      setPwMessage({ type: 'success', text: 'Password updated successfully.' })
+      setNewPassword('')
+      setConfirmPassword('')
+      setTimeout(() => { setShowPwChange(false); setPwMessage(null) }, 2000)
+    } catch (err: any) {
+      setPwMessage({ type: 'error', text: err?.message || 'Failed to update password.' })
+    } finally {
+      setPwChanging(false)
+    }
   }
 
   if (loading || !user) {
@@ -106,13 +136,78 @@ function MePage() {
             </div>
           </div>
         </div>
-        <button
-          onClick={handleSignOut}
-          className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-xl border border-[rgb(var(--border))] text-[rgb(var(--muted-fg))] hover:text-red-400 hover:border-red-500/30 transition-colors flex-shrink-0"
-        >
-          <LogOut size={14} /> Sign out
-        </button>
+        <div className="flex flex-col gap-2 flex-shrink-0">
+          <button
+            onClick={() => { setShowPwChange(v => !v); setPwMessage(null) }}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-xl border border-[rgb(var(--border))] text-[rgb(var(--muted-fg))] hover:text-blue-400 hover:border-blue-500/30 transition-colors"
+          >
+            <KeyRound size={14} /> Password
+          </button>
+          <button
+            onClick={handleSignOut}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-xl border border-[rgb(var(--border))] text-[rgb(var(--muted-fg))] hover:text-red-400 hover:border-red-500/30 transition-colors"
+          >
+            <LogOut size={14} /> Sign out
+          </button>
+        </div>
       </div>
+
+      {/* Change password panel */}
+      {showPwChange && (
+        <div className="glass border border-[rgb(var(--border-soft))] rounded-2xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <KeyRound size={15} className="text-blue-400" />
+            <h3 className="font-semibold text-sm">Change Password</h3>
+          </div>
+          <form onSubmit={handlePasswordChange} className="space-y-3">
+            <input
+              type="password"
+              required
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="New password"
+              minLength={6}
+              className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] focus:border-blue-500 outline-none rounded-xl px-4 py-2.5 text-sm transition-colors"
+            />
+            <input
+              type="password"
+              required
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Confirm new password"
+              minLength={6}
+              className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] focus:border-blue-500 outline-none rounded-xl px-4 py-2.5 text-sm transition-colors"
+            />
+            {pwMessage && (
+              <div className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm ${
+                pwMessage.type === 'success'
+                  ? 'border border-green-500/20 bg-green-500/10 text-green-400'
+                  : 'border border-red-500/20 bg-red-500/10 text-red-400'
+              }`}>
+                {pwMessage.type === 'success' && <Check size={14} />}
+                {pwMessage.text}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowPwChange(false); setPwMessage(null); setNewPassword(''); setConfirmPassword('') }}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-[rgb(var(--border))] text-sm font-medium text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={pwChanging}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-50"
+              >
+                {pwChanging && <Loader2 size={15} className="animate-spin" />}
+                Update Password
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Activity stats */}
       {activityLoading ? (
