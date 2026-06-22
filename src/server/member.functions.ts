@@ -105,7 +105,7 @@ export const getPhotoComments = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     return withRetry(async () => {
       const result = await db.execute(sql`
-        SELECT id, netlify_email, display_name, body, created_at
+        SELECT id, netlify_user_id, netlify_email, display_name, body, created_at
         FROM photo_comments
         WHERE image_id = ${data.imageId}
         ORDER BY created_at ASC
