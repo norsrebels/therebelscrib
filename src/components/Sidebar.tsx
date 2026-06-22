@@ -18,6 +18,7 @@ import {
   User,
 
   BarChart2,
+  Vote,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -33,12 +34,13 @@ const NAV_ITEMS = [
   { path: '/player-dex', label: 'Player Dex', icon: Users },
   { path: '/tournaments', label: 'Tournaments', icon: Trophy },
   { path: '/gallery', label: 'Gallery', icon: Image },
+  { path: '/polls', label: 'Polls', icon: Vote },
   { path: '/social', label: 'Social Media', icon: Share2 },
   { path: '/leaderboard', label: 'Player Statistics', icon: BarChart2 },
 ]
 
 // Mobile bottom nav: Home, Player Dex, Tournaments, Player Statistics
-const BOTTOM_NAV_ITEMS = [NAV_ITEMS[0], NAV_ITEMS[1], NAV_ITEMS[2], NAV_ITEMS[5]]
+const BOTTOM_NAV_ITEMS = [NAV_ITEMS[0], NAV_ITEMS[1], NAV_ITEMS[2], NAV_ITEMS[6]]
 
 export function Sidebar() {
   const location = useLocation()
