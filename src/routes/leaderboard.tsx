@@ -1,5 +1,5 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useState, useMemo, useCallback } from 'react'
+import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { getAllPlayerStats } from '@/server/stats.functions'
 import {
   type PlayerStatRow,
@@ -82,6 +82,24 @@ function PlayerStatsPage() {
   const [selectedRanking, setSelectedRanking] = useState<RankingKey>('totalPts')
   const [selectedPlayer, setSelectedPlayer] = useState<number | null>(null)
   const [copiedId, setCopiedId] = useState<number | null>(null)
+
+  // Live leaderboard: re-run the loader on an interval so stats update across
+  // all viewers during a match without a manual reload. Polls only while the
+  // tab is visible (saves work when backgrounded) and refreshes immediately on
+  // re-focus. Single knob: REFRESH_MS.
+  const router = useRouter()
+  useEffect(() => {
+    const REFRESH_MS = 15000
+    const refresh = () => {
+      if (document.visibilityState === 'visible') router.invalidate()
+    }
+    const timer = setInterval(refresh, REFRESH_MS)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [router])
 
   const handleCopy = useCallback((e: React.MouseEvent, p: any, value: string) => {
     e.stopPropagation()
