@@ -10,6 +10,7 @@ export const players = pgTable("players", {
   jerseyNumber: integer("jersey_number"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  version: integer("version").notNull().default(0),
 });
 
 export const assessments = pgTable("assessments", {
@@ -56,6 +57,7 @@ export const assessments = pgTable("assessments", {
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  version: integer("version").notNull().default(0),
 });
 
 export const settings = pgTable("settings", {
@@ -63,6 +65,7 @@ export const settings = pgTable("settings", {
   key: text().notNull().unique(),
   value: jsonb().notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  version: integer("version").notNull().default(0),
 });
 
 export const tournaments = pgTable("tournaments", {
@@ -72,6 +75,7 @@ export const tournaments = pgTable("tournaments", {
   archived: boolean().notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  version: integer("version").notNull().default(0),
 });
 
 export const albums = pgTable("albums", {
@@ -80,6 +84,7 @@ export const albums = pgTable("albums", {
   coverImageUrl: text("cover_image_url"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  version: integer("version").notNull().default(0),
 });
 
 export const albumImages = pgTable("album_images", {
@@ -97,6 +102,7 @@ export const siteSettings = pgTable("site_settings", {
   key: text().notNull().unique(),
   value: text().notNull().default(""),
   updatedAt: timestamp("updated_at").defaultNow(),
+  version: integer("version").notNull().default(0),
 });
 
 export const announcements = pgTable('announcements', {
@@ -108,6 +114,7 @@ export const announcements = pgTable('announcements', {
   pinned: boolean().notNull().default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  version: integer("version").notNull().default(0),
 })
 
 // VIS Match Stats System
@@ -124,6 +131,7 @@ export const visMatches = pgTable('vis_matches', {
   tournamentMatchId: text('tournament_match_id'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  version: integer("version").notNull().default(0),
 })
 
 export const visMatchPlayers = pgTable('vis_match_players', {
@@ -162,6 +170,7 @@ export const visSetStats = pgTable('vis_set_stats', {
   receiveAttempt: integer('receive_attempt').notNull().default(0),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
+  version: integer("version").notNull().default(0),
 })
 
 // ─── VIS Statistics Module ──────────────────────────────────────
@@ -215,6 +224,7 @@ export const playerStats = pgTable('player_stats', {
   matchVenue: text('match_venue'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  version: integer("version").notNull().default(0),
 })
 
 export const auditLog = pgTable('audit_log', {
