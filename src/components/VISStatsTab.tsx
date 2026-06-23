@@ -34,6 +34,7 @@ import {
   blockPoints,
   pointsTotal,
   aggregateTeamStats,
+  STAT_FIELDS,
   fmt2,
   fmtPct,
   fmtEff,
@@ -182,7 +183,11 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
   const [myTeam, setMyTeam]                 = useState<'all' | 'A' | 'B'>('all')
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollRef        = useRef<ReturnType<typeof setInterval> | null>(null)
-  const prevStatsRef   = useRef<typeof stats>({})
+  const statsRef       = useRef<typeof stats>({})
+  const pendingRef     = useRef<Map<string, number>>(new Map())
+  // Live mirror of `stats` so the poll can reconcile against what the user is
+  // currently seeing, without adding `stats` to loadStats's dependency list.
+  useEffect(() => { statsRef.current = stats }, [stats])
 
   const allMatches = useMemo(() => {
     const pool = (state?.poolMatches ?? []).map(m => ({
@@ -237,37 +242,58 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
     if (unresolvedCount > 0) return
     try {
       const data = await getPlayerStats({ data: { matchId: selectedMatchId } })
-      const map: Record<string, Record<number, PlayerStatRow>> = {}
+      const server: Record<string, Record<number, PlayerStatRow>> = {}
       for (const row of data) {
-        const key = String(row.playerId)
-        if (!map[key]) map[key] = {}
-        map[key][row.setNumber] = row as any
+        const k = String(row.playerId)
+        if (!server[k]) server[k] = {}
+        server[k][row.setNumber] = row as any
       }
 
-      // Conflict detection: compare with previous snapshot
-      if (detectConflicts) {
-        const newConflicts = new Set<string>()
-        for (const [pid, sets] of Object.entries(map)) {
-          for (const [setNum, row] of Object.entries(sets)) {
-            const prevRow = prevStatsRef.current[pid]?.[Number(setNum)]
-            if (!prevRow) continue
-            for (const field of Object.keys(row) as StatField[]) {
-              const cur = (row as any)[field] ?? 0
-              const prev = (prevRow as any)[field] ?? 0
-              if (cur !== prev) {
-                newConflicts.add(`${pid}-${setNum}-${field}`)
-              }
+      // Reconcile server truth with local optimistic state, field by field:
+      //  • A field with an in-flight local tap (pendingRef > 0) keeps the LOCAL
+      //    value, so a poll landing mid-tap never reverts the on-screen number.
+      //  • Every other field takes the SERVER value, so other statisticians'
+      //    edits flow in — one source of truth across all users.
+      //  • A real conflict is a field we are NOT writing whose server value
+      //    differs from what we are currently showing (someone else changed it).
+      //    Our own committed taps already equal the server, so they never flag.
+      const local = statsRef.current
+      const merged: Record<string, Record<number, PlayerStatRow>> = {}
+      const newConflicts = new Set<string>()
+      const playerKeys = new Set([...Object.keys(server), ...Object.keys(local)])
+      for (const pk of playerKeys) {
+        merged[pk] = {}
+        const setNums = new Set<number>([
+          ...Object.keys(server[pk] ?? {}).map(Number),
+          ...Object.keys(local[pk] ?? {}).map(Number),
+        ])
+        for (const sn of setNums) {
+          const sRow = server[pk]?.[sn]
+          const lRow = local[pk]?.[sn]
+          const base: any = { ...(sRow ?? lRow ?? EMPTY_ROW()) }
+          for (const field of STAT_FIELDS) {
+            const k = `${pk}-${sn}-${field}`
+            const pending = pendingRef.current.get(k) ?? 0
+            const sVal = (sRow as any)?.[field] ?? 0
+            const lVal = (lRow as any)?.[field] ?? 0
+            if (pending > 0) {
+              base[field] = lVal
+            } else {
+              base[field] = sVal
+              if (detectConflicts && lRow && sVal !== lVal) newConflicts.add(k)
             }
           }
-        }
-        if (newConflicts.size > 0) {
-          setConflicts(newConflicts)
-          setTimeout(() => setConflicts(new Set()), 5000)
+          merged[pk][sn] = base
         }
       }
 
-      prevStatsRef.current = map
-      setStats(map)
+      if (detectConflicts && newConflicts.size > 0) {
+        setConflicts(newConflicts)
+        setTimeout(() => setConflicts(new Set()), 5000)
+      }
+
+      statsRef.current = merged
+      setStats(merged)
       setLastPollAt(new Date())
     } catch { /* ignore */ }
   }, [selectedMatchId, dbPlayerIds, playersForMatch])
@@ -368,7 +394,9 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
         ...current,
         [field]: Math.max(0, (current[field] ?? 0) + delta),
       }
-      return { ...prev, [key]: playerSets }
+      const next = { ...prev, [key]: playerSets }
+      statsRef.current = next  // keep the reconciliation mirror current immediately
+      return next
     })
 
     // Block if match is finalized
@@ -382,6 +410,10 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
     }
 
     setSaveStatus('saving')
+    // Mark this field as having an in-flight write so a concurrent poll keeps the
+    // optimistic value until the server confirms it (prevents flicker/revert).
+    const pendingKey = `${key}-${selectedSet}-${field}`
+    pendingRef.current.set(pendingKey, (pendingRef.current.get(pendingKey) ?? 0) + 1)
     try {
       await upsertPlayerStat({
         data: {
@@ -400,6 +432,10 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
       addToOfflineQueue({ matchId: selectedMatchId, playerId: dbPlayerId, teamId: tournamentId, setNumber: selectedSet, field, delta })
       refreshQueueCount()
       setSaveStatus('saved')
+    } finally {
+      const n = (pendingRef.current.get(pendingKey) ?? 1) - 1
+      if (n <= 0) pendingRef.current.delete(pendingKey)
+      else pendingRef.current.set(pendingKey, n)
     }
   }, [selectedMatchId, selectedSet, dbPlayerIds, tournamentId, online, refreshQueueCount])
 
