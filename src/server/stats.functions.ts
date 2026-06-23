@@ -138,6 +138,13 @@ export const upsertPlayerStat = createServerFn({ method: 'POST' })
         set: {
           [fieldKey]: sql`GREATEST(0, ${col} + ${data.delta})`,
           updatedAt: new Date(),
+          // Self-heal the tournament tag. player_stats.team_id holds the tournament
+          // (schedule) id a row belongs to. A row created with a wrong/legacy tag —
+          // e.g. an offline tap before the client fix, stamped with a within-match
+          // team id — gets normalized to the canonical tournament id on the next
+          // write. 'vis-hub' rows belong to the VIS Match Stats system, not a
+          // tournament, so they are never overwritten.
+          teamId: sql`CASE WHEN ${playerStats.teamId} = 'vis-hub' THEN ${playerStats.teamId} ELSE ${data.teamId} END`,
         },
       }).returning()
 
@@ -196,7 +203,13 @@ export const savePlayerStatRow = createServerFn({ method: 'POST' })
         ...values,
       }).onConflictDoUpdate({
         target: [playerStats.matchId, playerStats.playerId, playerStats.setNumber],
-        set: { ...values, updatedAt: new Date() },
+        set: {
+          ...values,
+          updatedAt: new Date(),
+          // Same self-heal as upsertPlayerStat: normalize a stale team_id to the
+          // tournament id, but never overwrite a 'vis-hub' row.
+          teamId: sql`CASE WHEN ${playerStats.teamId} = 'vis-hub' THEN ${playerStats.teamId} ELSE ${data.teamId} END`,
+        },
       })
 
       // Distinct action so undoLastStat (which targets STAT_CREATE/STAT_UPDATE) ignores
