@@ -157,40 +157,13 @@ const GROUP_BG: Record<StatGroupKey, string> = {
 export function VISStatsTab({ state, tournamentId }: { state: TournamentState; tournamentId: string }) {
   const { user, hasStatAccess, loading: authLoading } = useAuth()
 
-  // Guard against undefined state during initial load
-  if (!state || !Array.isArray(state.poolMatches) || !Array.isArray(state.teams)) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={24} className="animate-spin text-[rgb(var(--muted-fg))]" />
-      </div>
-    )
-  }
-
-  // Auth guard — must be signed in with admin or statistician role
-  if (authLoading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={24} className="animate-spin text-[rgb(var(--muted-fg))]" />
-      </div>
-    )
-  }
-
-  if (!user || !hasStatAccess) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-        <Lock size={32} className="text-[rgb(var(--muted-fg))] opacity-50" />
-        <div>
-          <p className="font-bold text-lg">Access Restricted</p>
-          <p className="text-sm text-[rgb(var(--muted-fg))] mt-1 max-w-xs">
-            You need to be signed in as a statistician or admin to enter match stats.
-          </p>
-        </div>
-        <a href="/login" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-colors">
-          Sign In
-        </a>
-      </div>
-    )
-  }
+  // NOTE: Rules of Hooks — every hook below must run on every render, in the
+  // same order. The loading/access guards used to sit HERE, before those hooks,
+  // so a render that returned early ran fewer hooks than a normal render. Once
+  // auth resolved, React threw error #310 ("Rendered more hooks than during the
+  // previous render"). The guards now run just before the final return, after
+  // all hooks have executed. State reads below use `state?.` so they are safe
+  // even before `state` has loaded.
 
   const [subTab, setSubTab]                 = useState<SubTab>('live')
   const [selectedMatchId, setSelectedMatchId] = useState<string>('')
@@ -212,15 +185,15 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
   const prevStatsRef   = useRef<typeof stats>({})
 
   const allMatches = useMemo(() => {
-    const pool = (state.poolMatches ?? []).map(m => ({
+    const pool = (state?.poolMatches ?? []).map(m => ({
       id: m.id,
-      label: `${(state.teams ?? []).find(t => t.id === m.teamAId)?.name ?? '?'} vs ${(state.teams ?? []).find(t => t.id === m.teamBId)?.name ?? '?'}`,
+      label: `${(state?.teams ?? []).find(t => t.id === m.teamAId)?.name ?? '?'} vs ${(state?.teams ?? []).find(t => t.id === m.teamBId)?.name ?? '?'}`,
       teamAId: m.teamAId,
       teamBId: m.teamBId,
     }))
-    const playoffs = (state.playoffGames ?? []).filter(g => g.teamAId && g.teamBId).map(g => ({
+    const playoffs = (state?.playoffGames ?? []).filter(g => g.teamAId && g.teamBId).map(g => ({
       id: g.slot,
-      label: `${g.label ?? g.slot}: ${(state.teams ?? []).find(t => t.id === g.teamAId)?.name ?? '?'} vs ${(state.teams ?? []).find(t => t.id === g.teamBId)?.name ?? '?'}`,
+      label: `${g.label ?? g.slot}: ${(state?.teams ?? []).find(t => t.id === g.teamAId)?.name ?? '?'} vs ${(state?.teams ?? []).find(t => t.id === g.teamBId)?.name ?? '?'}`,
       teamAId: g.teamAId!,
       teamBId: g.teamBId!,
     }))
@@ -231,12 +204,12 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
 
   const playersForMatch = useMemo(() => {
     if (!selectedMatch) return []
-    const teamA = (state.teams ?? []).find(t => t.id === selectedMatch.teamAId)
-    const teamB = (state.teams ?? []).find(t => t.id === selectedMatch.teamBId)
+    const teamA = (state?.teams ?? []).find(t => t.id === selectedMatch.teamAId)
+    const teamB = (state?.teams ?? []).find(t => t.id === selectedMatch.teamBId)
     const playersA = (teamA?.players ?? []).map(p => ({ ...p, teamId: selectedMatch.teamAId, teamName: teamA?.name ?? '?' }))
     const playersB = (teamB?.players ?? []).map(p => ({ ...p, teamId: selectedMatch.teamBId, teamName: teamB?.name ?? '?' }))
     return [...playersA, ...playersB]
-  }, [selectedMatch, state.teams])
+  }, [selectedMatch, state?.teams])
 
   const [dbPlayerIds, setDbPlayerIds] = useState<Record<string, number>>({})
 
@@ -377,7 +350,12 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
     return aggregateTeamStats(rows)
   }, [stats, dbPlayerIds])
 
-  const handleTap = useCallback(async (playerId: string, teamId: string, field: StatField, delta: number) => {
+  // NOTE: `_teamId` is the within-match team (teamA/teamB) used only for UI
+  // grouping by callers. It must NOT be written to player_stats — the DB column
+  // team_id holds the TOURNAMENT/schedule id. The online path writes tournamentId;
+  // the offline queue must match, or offline-recorded stats get the wrong tag and
+  // drop out of the tournament leaderboard. Keep all paths writing tournamentId.
+  const handleTap = useCallback(async (playerId: string, _teamId: string, field: StatField, delta: number) => {
     const dbPlayerId = dbPlayerIds[playerId]
     if (dbPlayerId === undefined) return
     const key = String(dbPlayerId)
@@ -397,7 +375,7 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
     if (matchLock) return
 
     if (!online) {
-      addToOfflineQueue({ matchId: selectedMatchId, playerId: dbPlayerId, teamId, setNumber: selectedSet, field, delta })
+      addToOfflineQueue({ matchId: selectedMatchId, playerId: dbPlayerId, teamId: tournamentId, setNumber: selectedSet, field, delta })
       refreshQueueCount()
       setSaveStatus('saved')
       return
@@ -419,7 +397,7 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
       saveTimeoutRef.current = setTimeout(() => setSaveStatus('idle'), 2000)
     } catch {
-      addToOfflineQueue({ matchId: selectedMatchId, playerId: dbPlayerId, teamId, setNumber: selectedSet, field, delta })
+      addToOfflineQueue({ matchId: selectedMatchId, playerId: dbPlayerId, teamId: tournamentId, setNumber: selectedSet, field, delta })
       refreshQueueCount()
       setSaveStatus('saved')
     }
@@ -495,6 +473,40 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
       setSortCol(col)
       setSortDir('desc')
     }
+  }
+
+  // ── Access / loading guards — AFTER all hooks (see Rules-of-Hooks note above) ──
+  if (!state || !Array.isArray(state?.poolMatches) || !Array.isArray(state?.teams)) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={24} className="animate-spin text-[rgb(var(--muted-fg))]" />
+      </div>
+    )
+  }
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={24} className="animate-spin text-[rgb(var(--muted-fg))]" />
+      </div>
+    )
+  }
+
+  if (!user || !hasStatAccess) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+        <Lock size={32} className="text-[rgb(var(--muted-fg))] opacity-50" />
+        <div>
+          <p className="font-bold text-lg">Access Restricted</p>
+          <p className="text-sm text-[rgb(var(--muted-fg))] mt-1 max-w-xs">
+            You need to be signed in as a statistician or admin to enter match stats.
+          </p>
+        </div>
+        <a href="/login" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-colors">
+          Sign In
+        </a>
+      </div>
+    )
   }
 
   return (
@@ -683,8 +695,8 @@ function LiveEntryPanel({
 
   const teamAPlayers = players.filter(p => p.teamId === selectedMatch?.teamAId)
   const teamBPlayers = players.filter(p => p.teamId === selectedMatch?.teamBId)
-  const teamAName = (state.teams ?? []).find(t => t.id === selectedMatch?.teamAId)?.name ?? 'Team A'
-  const teamBName = (state.teams ?? []).find(t => t.id === selectedMatch?.teamBId)?.name ?? 'Team B'
+  const teamAName = (state?.teams ?? []).find(t => t.id === selectedMatch?.teamAId)?.name ?? 'Team A'
+  const teamBName = (state?.teams ?? []).find(t => t.id === selectedMatch?.teamBId)?.name ?? 'Team B'
 
   // Filter to assigned team
   const visibleTeamA = myTeam === 'B' ? [] : teamAPlayers
