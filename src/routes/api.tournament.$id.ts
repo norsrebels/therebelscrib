@@ -5,7 +5,7 @@ import { defaultState, type TournamentState } from '@/lib/tournament'
 import { requireAdmin } from '@/lib/auth-server'
 import { jsonResponse, errorResponse } from '@/lib/db-retry'
 
-const tournamentsStore = getStore('tournaments')
+const tournamentsStore = getStore('tournaments', { consistency: 'strong' })
 
 function getTournamentKey(id: string) {
   return `state/${id}`
