@@ -386,6 +386,9 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
     if (dbPlayerId === undefined) return
     const key = String(dbPlayerId)
 
+    // Block taps on a finalized/locked match (no-op — no optimistic flash)
+    if (matchLock) return
+
     // Optimistic UI update — always immediate
     setStats(prev => {
       const playerSets = { ...prev[key] }
@@ -398,9 +401,6 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
       statsRef.current = next  // keep the reconciliation mirror current immediately
       return next
     })
-
-    // Block if match is finalized
-    if (matchLock) return
 
     if (!online) {
       addToOfflineQueue({ matchId: selectedMatchId, playerId: dbPlayerId, teamId: tournamentId, setNumber: selectedSet, field, delta })
@@ -679,7 +679,6 @@ export function VISStatsTab({ state, tournamentId }: { state: TournamentState; t
           conflicts={conflicts}
           myTeam={myTeam}
           dbPlayerIds={dbPlayerIds}
-          isLocked={!!matchLock}
         />
       ) : (
         <StatTable
@@ -713,7 +712,6 @@ function LiveEntryPanel({
   onTap: (playerId: string, teamId: string, field: StatField, delta: number) => void
   onUndo: () => void
   undoing: boolean
-  isLocked: boolean
   getStatRow: (playerId: string, setNum: number) => PlayerStatRow
   state: TournamentState
   selectedMatch: any
@@ -726,8 +724,6 @@ function LiveEntryPanel({
   dbPlayerIds: Record<string, number>
 }) {
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null)
-  // Block all tap interactions when match is locked
-  const effectiveOnTap = isLocked ? () => {} : onTap
 
   const teamAPlayers = players.filter(p => p.teamId === selectedMatch?.teamAId)
   const teamBPlayers = players.filter(p => p.teamId === selectedMatch?.teamBId)
