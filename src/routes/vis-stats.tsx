@@ -83,7 +83,7 @@ function VisStatsPage() {
     sets: number
     players: { name: string; jersey: number }[]
   } | null>(null)
-  const { toasts, showToast, removeToast } = useToast()
+  const { toast, showToast } = useToast()
 
   // Parse tournament deep-link context
   useEffect(() => {
@@ -162,7 +162,7 @@ function VisStatsPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
-      {toasts.map(t => <ToastBar key={t.id} message={t.message} type={t.type} onClose={() => removeToast(t.id)} />)}
+      {toast && <ToastBar toast={toast} />}
       {/* Deprecation notice */}
       <div className="flex items-start gap-3 px-4 py-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 mb-6">
         <AlertTriangle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
