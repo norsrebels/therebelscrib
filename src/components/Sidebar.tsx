@@ -42,16 +42,29 @@ const NAV_ITEMS = [
 // Mobile bottom nav: Home, Player Dex, Tournaments, Player Statistics
 const BOTTOM_NAV_ITEMS = [NAV_ITEMS[0], NAV_ITEMS[1], NAV_ITEMS[2], NAV_ITEMS[6]]
 
+type ThemeMode = 'light' | 'dark' | 'system'
+
+// Apply a theme by setting the data-theme attribute styles.css keys off of,
+// resolving 'system' to the OS preference. Mirrors the inline script in __root.tsx.
+function applyTheme(t: ThemeMode) {
+  if (typeof document === 'undefined') return
+  const resolved = t === 'system'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : t
+  document.documentElement.setAttribute('data-theme', resolved)
+}
+
 export function Sidebar() {
   const location = useLocation()
   const { isAdmin, user } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [theme, setTheme] = useState<ThemeMode>('light')
   const [collapsed, setCollapsed] = useState(false)
 
   useEffect(() => {
     const saved = localStorage.getItem('tr_theme') || 'dark'
-    setTheme(saved as 'light' | 'dark')
+    setTheme(saved as ThemeMode)
+    applyTheme(saved as ThemeMode)
   }, [])
 
   useEffect(() => {
