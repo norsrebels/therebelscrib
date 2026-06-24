@@ -57,6 +57,10 @@ type RankingKey =
   | 'digsPerSet' | 'digSuccessRate'
   | 'blocksPerSet'
 
+const POSITION_LABELS: Record<string, string> = {
+  OS: 'Open Spiker', OPP: 'Opposite Spiker', MB: 'Middle Blocker', S: 'Setter', L: 'Libero',
+}
+
 const RANKINGS: { key: RankingKey; label: string; minLabel?: string; group: string }[] = [
   { key: 'totalPts',        label: 'Total points',      group: 'Points' },
   { key: 'ptsPerSet',       label: 'Points / set',      minLabel: `min ${MIN_SETS} sets`,   group: 'Points' },
@@ -110,39 +114,6 @@ function PlayerStatsPage() {
       setTimeout(() => setCopiedId(null), 2000)
     })
   }, [selectedRanking])
-
-  const handleExportCSV = useCallback(() => {
-    const headers = ['Rank', 'Name', 'Jersey', 'Position', 'Sets', 'K', 'E', 'Att', 'Eff', 'Kill%', 'SA', 'SE', 'BS', 'BA', 'Blk Pts', 'D', 'DE', 'FB', 'Ast', 'PTS']
-    const rows = ranked.map((p: any, i: number) => [
-      i + 1,
-      p.name,
-      p.jersey ?? '',
-      p.position ?? '',
-      p.totalSets,
-      p.attackKill, p.attackError,
-      p.attackKill + p.attackError + p.attackAttempt,
-      p.attackKill + p.attackError + p.attackAttempt > 0
-        ? ((p.attackKill - p.attackError) / (p.attackKill + p.attackError + p.attackAttempt)).toFixed(3)
-        : '—',
-      p.attackKill + p.attackError + p.attackAttempt > 0
-        ? ((p.attackKill / (p.attackKill + p.attackError + p.attackAttempt)) * 100).toFixed(1) + '%'
-        : '—',
-      p.serveAce, p.serveError,
-      p.blockSolo, p.blockAssist,
-      (p.blockSolo + p.blockAssist * 0.5).toFixed(1),
-      p.dig, p.digError, p.freeballDig ?? 0,
-      p.setAssist,
-      p.attackKill + p.serveAce + p.blockSolo + Math.round(p.blockAssist * 0.5),
-    ])
-    const csv = [headers, ...rows].map(r => r.join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `rebels_leaderboard_${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [ranked])
 
   const selectedScheduleId = search.schedule ?? ''
   const selectedScheduleName = schedules.find((s: any) => s.id === selectedScheduleId)?.name ?? ''
@@ -204,6 +175,14 @@ function PlayerStatsPage() {
     })
   }, [stats, playerMap])
 
+  // Position filter options derived from what's actually in the roster, so the
+  // filter always aligns with the data — codes that aren't present are never
+  // offered, and any code that IS present is selectable and will match.
+  const availablePositions = useMemo(
+    () => Array.from(new Set(aggregated.map(p => p.position).filter(Boolean))).sort(),
+    [aggregated],
+  )
+
   const ranked = useMemo(() => {
     let f = selectedPositionFilter
       ? aggregated.filter(p => p.position === selectedPositionFilter)
@@ -225,6 +204,39 @@ function PlayerStatsPage() {
     }
     return f
   }, [aggregated, selectedRanking, selectedPositionFilter])
+
+  const handleExportCSV = useCallback(() => {
+    const headers = ['Rank', 'Name', 'Jersey', 'Position', 'Sets', 'K', 'E', 'Att', 'Eff', 'Kill%', 'SA', 'SE', 'BS', 'BA', 'Blk Pts', 'D', 'DE', 'FB', 'Ast', 'PTS']
+    const rows = ranked.map((p: any, i: number) => [
+      i + 1,
+      p.name,
+      p.jersey ?? '',
+      p.position ?? '',
+      p.totalSets,
+      p.attackKill, p.attackError,
+      p.attackKill + p.attackError + p.attackAttempt,
+      p.attackKill + p.attackError + p.attackAttempt > 0
+        ? ((p.attackKill - p.attackError) / (p.attackKill + p.attackError + p.attackAttempt)).toFixed(3)
+        : '—',
+      p.attackKill + p.attackError + p.attackAttempt > 0
+        ? ((p.attackKill / (p.attackKill + p.attackError + p.attackAttempt)) * 100).toFixed(1) + '%'
+        : '—',
+      p.serveAce, p.serveError,
+      p.blockSolo, p.blockAssist,
+      (p.blockSolo + p.blockAssist * 0.5).toFixed(1),
+      p.dig, p.digError, p.freeballDig ?? 0,
+      p.setAssist,
+      p.attackKill + p.serveAce + p.blockSolo + Math.round(p.blockAssist * 0.5),
+    ])
+    const csv = [headers, ...rows].map(r => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `rebels_leaderboard_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [ranked])
 
   const formatValue = (p: typeof aggregated[0]): string => {
     switch (selectedRanking) {
@@ -257,7 +269,7 @@ function PlayerStatsPage() {
             <p className="text-sm text-[rgb(var(--muted-fg))]">
               {[
                 selectedScheduleName || 'All schedules',
-                selectedPositionFilter ? { OS: 'Open Spikers', OPP: 'Opposite Spikers', MB: 'Middle Blockers', S: 'Setters', L: 'Liberos' }[selectedPositionFilter] : 'All positions',
+                selectedPositionFilter ? (POSITION_LABELS[selectedPositionFilter] ?? selectedPositionFilter) : 'All positions',
               ].join(' · ')}
             </p>
           </div>
@@ -277,11 +289,9 @@ function PlayerStatsPage() {
             <select value={selectedPositionFilter} onChange={handlePositionChange}
               className="appearance-none pl-4 pr-9 py-2.5 rounded-xl text-sm font-medium bg-[rgb(var(--surface))] border border-[rgb(var(--border))] text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] focus:outline-none focus:ring-2 focus:ring-blue-500/40 cursor-pointer">
               <option value="">All positions</option>
-              <option value="OS">Open Spiker</option>
-              <option value="OPP">Opposite Spiker</option>
-              <option value="MB">Middle Blocker</option>
-              <option value="S">Setter</option>
-              <option value="L">Libero</option>
+              {availablePositions.map(pos => (
+                <option key={pos} value={pos}>{POSITION_LABELS[pos] ?? pos}</option>
+              ))}
             </select>
             <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))]" size={14} />
           </div>
