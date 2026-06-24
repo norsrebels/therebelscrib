@@ -15,7 +15,7 @@ import {
   Lock, Plus, ChevronRight, BarChart2, Users, Trash2,
   Download, Trophy, X, Check, ChevronDown, ChevronUp,
   Shield, Zap, Target, Save, RefreshCw,
-  ClipboardList, Link2,
+  ClipboardList, Link2, AlertTriangle,
 } from 'lucide-react'
 import { useToast } from '@/lib/use-toast'
 import { ToastBar } from '@/components/Modals'
