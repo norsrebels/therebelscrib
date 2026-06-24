@@ -407,12 +407,17 @@ export const getAllPlayerStats = createServerFn({ method: 'GET' })
   .inputValidator((data: { tournamentId?: string }) => data)
   .handler(async ({ data }) => {
     return withRetry(async () => {
-      const schedules = await db.select({
-        id: tournaments.externalId,
-        name: tournaments.name,
-      }).from(tournaments)
+      // Build the schedule list from the team_ids actually present on stats,
+      // joined to tournament names. This guarantees each option's id is exactly
+      // what the filter keys on (player_stats.team_id), so selecting a schedule
+      // always matches. The inner join also drops 'vis-hub' and any orphaned tag
+      // that doesn't map to a real tournament, and shows only schedules with stats.
+      const schedules = await db
+        .selectDistinct({ id: playerStats.teamId, name: tournaments.name })
+        .from(playerStats)
+        .innerJoin(tournaments, eq(tournaments.externalId, playerStats.teamId))
         .where(eq(tournaments.archived, false))
-        .orderBy(tournaments.createdAt)
+        .orderBy(tournaments.name)
 
       let stats: any[]
       if (data.tournamentId) {
