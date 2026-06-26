@@ -521,11 +521,7 @@ function HomePage() {
   };
 
   const getAnnouncementText = (a: any) => {
-    // Strip HTML tags to get plain text for sharing
-    const tmp = document.createElement('div');
-    tmp.innerHTML = a.body || '';
-    const bodyText = tmp.textContent || tmp.innerText || '';
-    return `${a.title}\n\n${bodyText.trim()}\n\n${window.location.origin}`.trim();
+    return `${a.title}\n${window.location.origin}`;
   };
 
   const handleShare = async (a: any) => {
