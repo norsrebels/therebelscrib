@@ -8,7 +8,7 @@ import {
   deleteAnnouncement,
   togglePinAnnouncement,
 } from "@/server/announcements.functions";
-import { Pencil, Trash2, Pin, PinOff, Plus, Bold, Italic, Underline, List, ListOrdered, Image as ImageIcon, Video, X, Upload, Link as LinkIcon, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
+import { Pencil, Trash2, Pin, PinOff, Plus, Bold, Italic, Underline, List, ListOrdered, Image as ImageIcon, Video, X, Upload, Link as LinkIcon, AlignLeft, AlignCenter, AlignRight, Share2, Facebook, MessageCircle, Copy, Check } from "lucide-react";
 import { ConfirmationModal, ToastBar } from "@/components/Modals";
 import { useToast } from "@/lib/use-toast";
 
@@ -97,6 +97,10 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
 
   // Focus tracking to restore selection
   const [savedSelection, setSavedSelection] = useState<Range | null>(null);
+  // When the editor itself fires a change we set this flag so the value→DOM
+  // sync useEffect below does not overwrite the live DOM (which would destroy
+  // the selected image reference and break mid-drag slider resizing).
+  const internalChangeRef = useRef(false);
 
   const saveSelection = () => {
     const sel = window.getSelection();
@@ -114,6 +118,13 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
   };
 
   useEffect(() => {
+    // Only overwrite the editor DOM when the new value comes from outside
+    // (e.g. loading an existing announcement for editing). Skip when the change
+    // originated from inside the editor to avoid resetting image sizes / selection.
+    if (internalChangeRef.current) {
+      internalChangeRef.current = false;
+      return;
+    }
     if (editorRef.current && editorRef.current.innerHTML !== value) {
       editorRef.current.innerHTML = value;
     }
@@ -121,6 +132,7 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
 
   const handleInput = () => {
     if (editorRef.current) {
+      internalChangeRef.current = true;
       onChange(editorRef.current.innerHTML);
     }
   };
@@ -414,6 +426,15 @@ function HomePage() {
   const [formTagColor, setFormTagColor] = useState("blue");
   const [formPinned, setFormPinned] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [shareMenuId, setShareMenuId] = useState<number | null>(null);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (shareMenuId === null) return;
+    const close = () => setShareMenuId(null);
+    document.addEventListener("click", close, { capture: true });
+    return () => document.removeEventListener("click", close, { capture: true });
+  }, [shareMenuId]);
 
   const resetForm = () => {
     setFormTitle("");
@@ -497,6 +518,27 @@ function HomePage() {
     setFormTagColor(a.tagColor);
     setFormPinned(a.pinned);
     setShowAddForm(true);
+  };
+
+  const handleShare = async (a: any) => {
+    const url = window.location.origin;
+    const text = `${a.title}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: a.title, text, url });
+        return;
+      } catch {
+        // user cancelled or not supported — fall through to menu
+      }
+    }
+    setShareMenuId(shareMenuId === a.id ? null : a.id);
+  };
+
+  const handleCopyLink = async (id: number) => {
+    await navigator.clipboard.writeText(window.location.origin);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+    setShareMenuId(null);
   };
 
   return (
@@ -643,31 +685,84 @@ function HomePage() {
                           >
                             {a.tag}
                           </span>
-                          {isAdmin && (
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1">
+                            {/* Share button — always visible */}
+                            <div className="relative">
                               <button
-                                onClick={() => handleTogglePin(a.id, a.pinned)}
-                                className="p-1.5 rounded-lg bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors"
-                                title={a.pinned ? "Unpin" : "Pin"}
+                                onClick={() => handleShare(a)}
+                                className="p-1.5 rounded-lg text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] transition-colors"
+                                title="Share"
                               >
-                                {a.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+                                {copiedId === a.id ? <Check size={14} className="text-green-500" /> : <Share2 size={14} />}
                               </button>
-                              <button
-                                onClick={() => startEdit(a)}
-                                className="p-1.5 rounded-lg bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors"
-                                title="Edit"
-                              >
-                                <Pencil size={14} />
-                              </button>
-                              <button
-                                onClick={() => setDeleteConfirm(a.id)}
-                                className="p-1.5 rounded-lg bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))] hover:text-red-500 transition-colors"
-                                title="Delete"
-                              >
-                                <Trash2 size={14} />
-                              </button>
+                              {shareMenuId === a.id && (
+                                <div className="absolute right-0 top-8 z-50 w-48 glass border border-[rgb(var(--border-soft))] rounded-xl shadow-lg overflow-hidden">
+                                  <a
+                                    href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.origin)}&quote=${encodeURIComponent(a.title)}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={() => setShareMenuId(null)}
+                                    className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-[rgb(var(--surface-hover))] transition-colors"
+                                  >
+                                    <Facebook size={15} className="text-blue-500" />
+                                    Share on Facebook
+                                  </a>
+                                  <a
+                                    href={`https://wa.me/?text=${encodeURIComponent(a.title + ' ' + window.location.origin)}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={() => setShareMenuId(null)}
+                                    className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-[rgb(var(--surface-hover))] transition-colors"
+                                  >
+                                    <MessageCircle size={15} className="text-green-500" />
+                                    Share on WhatsApp
+                                  </a>
+                                  <a
+                                    href={`https://www.facebook.com/dialog/send?link=${encodeURIComponent(window.location.origin)}&app_id=291494979117269&redirect_uri=${encodeURIComponent(window.location.origin)}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={() => setShareMenuId(null)}
+                                    className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-[rgb(var(--surface-hover))] transition-colors"
+                                  >
+                                    <MessageCircle size={15} className="text-blue-400" />
+                                    Send via Messenger
+                                  </a>
+                                  <button
+                                    onClick={() => handleCopyLink(a.id)}
+                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-[rgb(var(--surface-hover))] transition-colors border-t border-[rgb(var(--border-soft))]"
+                                  >
+                                    <Copy size={15} className="text-[rgb(var(--muted-fg))]" />
+                                    Copy link
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          )}
+                            {isAdmin && (
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => handleTogglePin(a.id, a.pinned)}
+                                  className="p-1.5 rounded-lg bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors"
+                                  title={a.pinned ? "Unpin" : "Pin"}
+                                >
+                                  {a.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+                                </button>
+                                <button
+                                  onClick={() => startEdit(a)}
+                                  className="p-1.5 rounded-lg bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors"
+                                  title="Edit"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                                <button
+                                  onClick={() => setDeleteConfirm(a.id)}
+                                  className="p-1.5 rounded-lg bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))] hover:text-red-500 transition-colors"
+                                  title="Delete"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                         <h4 className="text-lg font-semibold mt-3 mb-2">{a.title}</h4>
                         <div className="text-sm text-[rgb(var(--muted-fg))] announcement-body" dangerouslySetInnerHTML={{ __html: a.body }} />
