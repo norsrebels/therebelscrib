@@ -16,11 +16,13 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+      { name: 'theme-color', content: '#0071e3' },
       { title: 'Rebels Volleyball' },
     ],
     links: [
       { rel: 'icon', type: 'image/png', href: '/favicon.png' },
       { rel: 'apple-touch-icon', href: '/logo.png' },
+      { rel: 'manifest', href: '/manifest.json' },
     ],
   }),
   shellComponent: RootDocument,
@@ -44,6 +46,13 @@ function RootLayout() {
     const handler = (e: Event) => setCollapsed((e as CustomEvent<boolean>).detail)
     window.addEventListener('tr_sidebar_collapsed_change', handler)
     return () => window.removeEventListener('tr_sidebar_collapsed_change', handler)
+  }, [])
+
+  // Register PWA service worker (enables install prompt on Chrome Android)
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
   }, [])
 
   // Global Netlify Identity hash handler
