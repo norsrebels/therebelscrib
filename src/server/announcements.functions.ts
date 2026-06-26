@@ -125,3 +125,16 @@ export const togglePinAnnouncement = createServerFn({ method: "POST" })
       return updatedAnnouncement;
     });
   });
+
+export const getAnnouncementById = createServerFn({ method: 'GET' })
+  .inputValidator((data: { id: number }) => data)
+  .handler(async ({ data: { id } }) => {
+    return withRetry(async () => {
+      const [row] = await db
+        .select()
+        .from(announcements)
+        .where(eq(announcements.id, id))
+        .limit(1);
+      return row ?? null;
+    });
+  });
