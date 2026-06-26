@@ -520,9 +520,17 @@ function HomePage() {
     setShowAddForm(true);
   };
 
+  const getAnnouncementText = (a: any) => {
+    // Strip HTML tags to get plain text for sharing
+    const tmp = document.createElement('div');
+    tmp.innerHTML = a.body || '';
+    const bodyText = tmp.textContent || tmp.innerText || '';
+    return `${a.title}\n\n${bodyText.trim()}\n\n${window.location.origin}`.trim();
+  };
+
   const handleShare = async (a: any) => {
     const url = window.location.origin;
-    const text = `${a.title}`;
+    const text = getAnnouncementText(a);
     if (navigator.share) {
       try {
         await navigator.share({ title: a.title, text, url });
@@ -534,8 +542,9 @@ function HomePage() {
     setShareMenuId(shareMenuId === a.id ? null : a.id);
   };
 
-  const handleCopyLink = async (id: number) => {
-    await navigator.clipboard.writeText(window.location.origin);
+  const handleCopyLink = async (id: number, a: any) => {
+    const text = getAnnouncementText(a);
+    await navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
     setShareMenuId(null);
@@ -696,9 +705,9 @@ function HomePage() {
                                 {copiedId === a.id ? <Check size={14} className="text-green-500" /> : <Share2 size={14} />}
                               </button>
                               {shareMenuId === a.id && (
-                                <div className="absolute right-0 top-8 z-50 w-48 glass border border-[rgb(var(--border-soft))] rounded-xl shadow-lg overflow-hidden">
+                                <div className="absolute right-0 top-8 z-50 w-52 glass border border-[rgb(var(--border-soft))] rounded-xl shadow-lg overflow-hidden">
                                   <a
-                                    href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.origin)}&quote=${encodeURIComponent(a.title)}`}
+                                    href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.origin)}&quote=${encodeURIComponent(getAnnouncementText(a))}`}
                                     target="_blank"
                                     rel="noreferrer"
                                     onClick={() => setShareMenuId(null)}
@@ -708,7 +717,7 @@ function HomePage() {
                                     Share on Facebook
                                   </a>
                                   <a
-                                    href={`https://wa.me/?text=${encodeURIComponent(a.title + ' ' + window.location.origin)}`}
+                                    href={`https://wa.me/?text=${encodeURIComponent(getAnnouncementText(a))}`}
                                     target="_blank"
                                     rel="noreferrer"
                                     onClick={() => setShareMenuId(null)}
@@ -728,11 +737,11 @@ function HomePage() {
                                     Send via Messenger
                                   </a>
                                   <button
-                                    onClick={() => handleCopyLink(a.id)}
+                                    onClick={() => handleCopyLink(a.id, a)}
                                     className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-[rgb(var(--surface-hover))] transition-colors border-t border-[rgb(var(--border-soft))]"
                                   >
-                                    <Copy size={15} className="text-[rgb(var(--muted-fg))]" />
-                                    Copy link
+                                    {copiedId === a.id ? <Check size={15} className="text-green-500" /> : <Copy size={15} className="text-[rgb(var(--muted-fg))]" />}
+                                    {copiedId === a.id ? "Copied!" : "Copy text"}
                                   </button>
                                 </div>
                               )}
