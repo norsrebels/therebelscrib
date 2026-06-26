@@ -8,7 +8,7 @@ import {
   deleteAnnouncement,
   togglePinAnnouncement,
 } from "@/server/announcements.functions";
-import { Pencil, Trash2, Pin, PinOff, Plus, Bold, Italic, Underline, List, ListOrdered, Image as ImageIcon, Video, X, Upload, Link as LinkIcon } from "lucide-react";
+import { Pencil, Trash2, Pin, PinOff, Plus, Bold, Italic, Underline, List, ListOrdered, Image as ImageIcon, Video, X, Upload, Link as LinkIcon, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
 import { ConfirmationModal, ToastBar } from "@/components/Modals";
 import { useToast } from "@/lib/use-toast";
 
@@ -29,6 +29,19 @@ const TAG_COLORS: Record<string, string> = {
 };
 
 
+// Removes the editor-only image-selection outline class so it never persists in the
+// saved announcement HTML (the class is purely a visual cue while editing).
+function stripImgSelection(html: string): string {
+  if (typeof document === 'undefined' || !html) return html
+  const tmp = document.createElement('div')
+  tmp.innerHTML = html
+  tmp.querySelectorAll('img.tr-img-sel').forEach((img) => {
+    img.classList.remove('tr-img-sel')
+    if (!img.getAttribute('class')) img.removeAttribute('class')
+  })
+  return tmp.innerHTML
+}
+
 function RichTextEditor({ value, onChange }: { value: string, onChange: (v: string) => void }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -40,6 +53,47 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
   const [imageUrl, setImageUrl] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  // In-editor image sizing: click an image to select it, then size/align it.
+  const [selectedImg, setSelectedImg] = useState<HTMLImageElement | null>(null);
+  const [imgWidth, setImgWidth] = useState(100);
+
+  const handleEditorClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const hadSelection = (editorRef.current?.querySelectorAll('img.tr-img-sel').length ?? 0) > 0;
+    editorRef.current?.querySelectorAll('img.tr-img-sel').forEach((im) => im.classList.remove('tr-img-sel'));
+    if (target.tagName === 'IMG') {
+      const img = target as HTMLImageElement;
+      img.classList.add('tr-img-sel');
+      setSelectedImg(img);
+      const w = parseInt(img.style.width || '100', 10);
+      setImgWidth(Number.isFinite(w) ? w : 100);
+    } else {
+      if (selectedImg) setSelectedImg(null);
+      if (hadSelection) handleInput();
+    }
+  };
+
+  const applyImgWidth = (pct: number) => {
+    if (!selectedImg) return;
+    selectedImg.style.width = `${pct}%`;
+    selectedImg.style.height = 'auto';
+    setImgWidth(pct);
+    handleInput();
+  };
+
+  const applyImgAlign = (align: 'left' | 'center' | 'right') => {
+    if (!selectedImg) return;
+    selectedImg.style.display = 'block';
+    selectedImg.style.marginLeft = align === 'left' ? '0' : 'auto';
+    selectedImg.style.marginRight = align === 'right' ? '0' : 'auto';
+    handleInput();
+  };
+
+  const deselectImg = () => {
+    selectedImg?.classList.remove('tr-img-sel');
+    setSelectedImg(null);
+    handleInput();
+  };
 
   // Focus tracking to restore selection
   const [savedSelection, setSavedSelection] = useState<Range | null>(null);
@@ -195,11 +249,42 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
         <button type="button" onClick={openImageModal} className="p-1.5 rounded hover:bg-[rgb(var(--surface-hover))]"><ImageIcon size={16} /></button>
         <button type="button" onClick={openVideoModal} className="p-1.5 rounded hover:bg-[rgb(var(--surface-hover))]"><Video size={16} /></button>
       </div>
+      {selectedImg && (
+        <div className="flex flex-wrap items-center gap-1.5 p-2 border-b border-[rgb(var(--border-soft))] bg-blue-500/5">
+          <span className="text-xs font-semibold text-[rgb(var(--muted-fg))] mr-1">Image size</span>
+          {([['S', 25], ['M', 50], ['L', 75], ['Full', 100]] as const).map(([label, pct]) => (
+            <button
+              key={pct}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => applyImgWidth(pct)}
+              className={`px-2 py-1 rounded text-xs font-bold ${imgWidth === pct ? 'bg-blue-600 text-white' : 'hover:bg-[rgb(var(--surface-hover))]'}`}
+            >
+              {label}
+            </button>
+          ))}
+          <input
+            type="range"
+            min={10}
+            max={100}
+            value={imgWidth}
+            onChange={(e) => applyImgWidth(Number(e.target.value))}
+            className="w-24 mx-1 accent-blue-600"
+          />
+          <span className="text-xs text-[rgb(var(--muted-fg))] w-9">{imgWidth}%</span>
+          <div className="w-px h-4 bg-[rgb(var(--border-strong))] mx-1" />
+          <button type="button" title="Align left" onMouseDown={(e) => e.preventDefault()} onClick={() => applyImgAlign('left')} className="p-1.5 rounded hover:bg-[rgb(var(--surface-hover))]"><AlignLeft size={14} /></button>
+          <button type="button" title="Center" onMouseDown={(e) => e.preventDefault()} onClick={() => applyImgAlign('center')} className="p-1.5 rounded hover:bg-[rgb(var(--surface-hover))]"><AlignCenter size={14} /></button>
+          <button type="button" title="Align right" onMouseDown={(e) => e.preventDefault()} onClick={() => applyImgAlign('right')} className="p-1.5 rounded hover:bg-[rgb(var(--surface-hover))]"><AlignRight size={14} /></button>
+          <button type="button" title="Done" onClick={deselectImg} className="ml-auto p-1.5 rounded hover:bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))]"><X size={14} /></button>
+        </div>
+      )}
       <div
         ref={editorRef}
         contentEditable
         onInput={handleInput}
         onBlur={handleInput}
+        onClick={handleEditorClick}
         className="announcement-body min-h-[150px] max-h-[400px] overflow-y-auto p-4 text-sm outline-none"
       />
       
@@ -342,6 +427,7 @@ function HomePage() {
 
   const handleSubmit = async () => {
     if (!formTitle.trim() || !formBody.trim()) return;
+    const cleanBody = stripImgSelection(formBody);
     setIsSaving(true);
     try {
       if (editId) {
@@ -350,7 +436,7 @@ function HomePage() {
             id: editId,
             updates: {
               title: formTitle,
-              body: formBody,
+              body: cleanBody,
               tag: formTag,
               tagColor: formTagColor,
               pinned: formPinned,
@@ -362,7 +448,7 @@ function HomePage() {
         await createAnnouncement({
           data: {
             title: formTitle,
-            body: formBody,
+            body: cleanBody,
             tag: formTag,
             tagColor: formTagColor,
             pinned: formPinned,
@@ -443,6 +529,7 @@ function HomePage() {
           </Link>
           <Link
             to="/tournaments"
+            search={{ id: undefined, community: undefined }}
             className="px-6 py-3 border border-[rgb(var(--border-strong))] text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] rounded-full font-bold shadow-sm transition-colors"
           >
             View Tournaments
