@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/lib/auth-client";
 import {
   getAnnouncements,
+  getAnnouncementById,
   createAnnouncement,
   updateAnnouncement,
   deleteAnnouncement,
@@ -14,6 +15,12 @@ import { ConfirmationModal, ToastBar } from "@/components/Modals";
 import { useToast } from "@/lib/use-toast";
 
 export const Route = createFileRoute("/")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    announcement:
+      typeof search.announcement === "string" || typeof search.announcement === "number"
+        ? Number(search.announcement)
+        : undefined,
+  }),
   loader: async () => {
     const announcements = await getAnnouncements();
     return { announcements };
@@ -453,6 +460,43 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
 
 function HomePage() {
   const { announcements } = Route.useLoaderData();
+  const { announcement: sharedId } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const [sharedAnnouncement, setSharedAnnouncement] = useState<any | null>(null);
+  const [sharedLoading, setSharedLoading] = useState(false);
+
+  // When the URL has ?announcement=ID, open it in a modal. Try the already-loaded
+  // list first (most recent 6); otherwise fetch it by id (older announcements).
+  useEffect(() => {
+    if (!sharedId) {
+      setSharedAnnouncement(null);
+      return;
+    }
+    const fromList = announcements.find((a: any) => a.id === sharedId);
+    if (fromList) {
+      setSharedAnnouncement(fromList);
+      return;
+    }
+    let cancelled = false;
+    setSharedLoading(true);
+    getAnnouncementById({ data: { id: sharedId } })
+      .then((row) => { if (!cancelled) setSharedAnnouncement(row); })
+      .catch(() => { if (!cancelled) setSharedAnnouncement(null); })
+      .finally(() => { if (!cancelled) setSharedLoading(false); });
+    return () => { cancelled = true; };
+  }, [sharedId, announcements]);
+
+  const closeSharedModal = () => {
+    navigate({ search: (prev: any) => ({ ...prev, announcement: undefined }) });
+  };
+
+  // Close shared modal on Escape
+  useEffect(() => {
+    if (!sharedId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeSharedModal(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sharedId]);
   const { isAdmin } = useAuth();
   const router = useRouter();
   const { toast, showToast } = useToast();
@@ -574,7 +618,7 @@ function HomePage() {
     setShowAddForm(true);
   };
 
-  const getAnnouncementUrl = (a: any) => `${window.location.origin}/announcements/${a.id}`;
+  const getAnnouncementUrl = (a: any) => `${window.location.origin}/?announcement=${a.id}`;
 
   const getAnnouncementText = (a: any) => {
     return `${a.title}\n${getAnnouncementUrl(a)}`;
@@ -893,6 +937,84 @@ function HomePage() {
             className="max-w-full max-h-[90vh] rounded-xl shadow-2xl object-contain"
             onClick={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+
+      {/* Shared announcement modal (opened via /?announcement=ID) */}
+      {sharedId && (
+        <div
+          className="fixed inset-0 z-[70] flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto"
+          onClick={closeSharedModal}
+        >
+          <div
+            className="relative bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] rounded-2xl shadow-2xl w-full max-w-2xl my-8 sm:my-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={closeSharedModal}
+              className="absolute top-4 right-4 p-2 rounded-full bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] transition-colors z-10"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+
+            {sharedLoading ? (
+              <div className="p-12 text-center text-[rgb(var(--muted-fg))]">Loading…</div>
+            ) : sharedAnnouncement ? (
+              <div className="p-6 sm:p-8">
+                {sharedAnnouncement.tag && (
+                  <span
+                    className={`inline-block text-xs font-bold px-2.5 py-1 rounded-full mb-4 ${
+                      TAG_COLORS[sharedAnnouncement.tagColor] || TAG_COLORS.blue
+                    }`}
+                  >
+                    {sharedAnnouncement.tag}
+                  </span>
+                )}
+                <h2 className="text-2xl font-bold tracking-tight mb-2 pr-8">{sharedAnnouncement.title}</h2>
+                {sharedAnnouncement.createdAt && (
+                  <p className="text-sm text-[rgb(var(--muted-fg))] mb-5">
+                    {new Date(sharedAnnouncement.createdAt).toLocaleDateString("en-US", {
+                      year: "numeric", month: "long", day: "numeric",
+                    })}
+                  </p>
+                )}
+                <div
+                  className="text-sm text-[rgb(var(--muted-fg))] announcement-body"
+                  dangerouslySetInnerHTML={{ __html: sharedAnnouncement.body }}
+                  onClick={(e) => {
+                    const t = e.target as HTMLElement;
+                    if (t.tagName === "IMG") {
+                      e.stopPropagation();
+                      setLightboxSrc((t as HTMLImageElement).src);
+                    }
+                  }}
+                />
+                <div className="mt-6 pt-5 border-t border-[rgb(var(--border-soft))] flex justify-end">
+                  <button
+                    onClick={closeSharedModal}
+                    className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2.5 text-sm font-semibold transition-colors"
+                  >
+                    Go to home
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-12 text-center">
+                <p className="text-4xl mb-3">📋</p>
+                <h2 className="text-lg font-bold mb-1">Announcement not found</h2>
+                <p className="text-sm text-[rgb(var(--muted-fg))] mb-6">
+                  It may have been deleted or the link is incorrect.
+                </p>
+                <button
+                  onClick={closeSharedModal}
+                  className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2.5 text-sm font-semibold transition-colors"
+                >
+                  Go to home
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </main>
