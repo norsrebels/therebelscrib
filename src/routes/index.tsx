@@ -8,7 +8,8 @@ import {
   deleteAnnouncement,
   togglePinAnnouncement,
 } from "@/server/announcements.functions";
-import { Pencil, Trash2, Pin, PinOff, Plus, Bold, Italic, Underline, List, ListOrdered, Image as ImageIcon, Video, X, Upload, Link as LinkIcon, AlignLeft, AlignCenter, AlignRight, Share2, Facebook, MessageCircle, Copy, Check } from "lucide-react";
+import { Pencil, Trash2, Pin, PinOff, Plus, Bold, Italic, Underline, List, ListOrdered, Image as ImageIcon, Video, X, Upload, Link as LinkIcon, AlignLeft, AlignCenter, AlignRight, Share2, Facebook, MessageCircle, Copy, Check, Search } from "lucide-react";
+import { AnnouncementReactions } from "@/components/AnnouncementReactions";
 import { ConfirmationModal, ToastBar } from "@/components/Modals";
 import { useToast } from "@/lib/use-toast";
 
@@ -56,6 +57,7 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
   // In-editor image sizing: click an image to select it, then size/align it.
   const [selectedImg, setSelectedImg] = useState<HTMLImageElement | null>(null);
   const [imgWidth, setImgWidth] = useState(100);
+  const [imgInline, setImgInline] = useState(false);
 
   const handleEditorClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -67,6 +69,7 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
       setSelectedImg(img);
       const w = parseInt(img.style.width || '100', 10);
       setImgWidth(Number.isFinite(w) ? w : 100);
+      setImgInline(img.style.display === 'inline-block');
     } else {
       if (selectedImg) setSelectedImg(null);
       if (hadSelection) handleInput();
@@ -86,6 +89,19 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
     selectedImg.style.display = 'block';
     selectedImg.style.marginLeft = align === 'left' ? '0' : 'auto';
     selectedImg.style.marginRight = align === 'right' ? '0' : 'auto';
+    handleInput();
+  };
+
+  const applyImgDisplay = (inline: boolean) => {
+    if (!selectedImg) return;
+    selectedImg.style.display = inline ? 'inline-block' : 'block';
+    selectedImg.style.verticalAlign = inline ? 'top' : '';
+    // inline-block images flow with siblings — clear block centering margins
+    if (inline) {
+      selectedImg.style.marginLeft = '';
+      selectedImg.style.marginRight = '';
+    }
+    setImgInline(inline);
     handleInput();
   };
 
@@ -288,6 +304,29 @@ function RichTextEditor({ value, onChange }: { value: string, onChange: (v: stri
           <button type="button" title="Align left" onMouseDown={(e) => e.preventDefault()} onClick={() => applyImgAlign('left')} className="p-1.5 rounded hover:bg-[rgb(var(--surface-hover))]"><AlignLeft size={14} /></button>
           <button type="button" title="Center" onMouseDown={(e) => e.preventDefault()} onClick={() => applyImgAlign('center')} className="p-1.5 rounded hover:bg-[rgb(var(--surface-hover))]"><AlignCenter size={14} /></button>
           <button type="button" title="Align right" onMouseDown={(e) => e.preventDefault()} onClick={() => applyImgAlign('right')} className="p-1.5 rounded hover:bg-[rgb(var(--surface-hover))]"><AlignRight size={14} /></button>
+          <div className="w-px h-4 bg-[rgb(var(--border-strong))] mx-1" />
+          <div className="flex items-center bg-[rgb(var(--surface-hover))] rounded-full p-0.5 border border-[rgb(var(--border-soft))]" title="Layout: stack (new line) or inline (side by side)">
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => applyImgDisplay(false)}
+              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
+                !imgInline ? 'bg-[rgb(var(--surface))] text-[rgb(var(--fg))] shadow-sm' : 'text-[rgb(var(--muted-fg))]'
+              }`}
+            >
+              Stack
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => applyImgDisplay(true)}
+              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
+                imgInline ? 'bg-[rgb(var(--surface))] text-[rgb(var(--fg))] shadow-sm' : 'text-[rgb(var(--muted-fg))]'
+              }`}
+            >
+              Inline
+            </button>
+          </div>
           <button type="button" title="Done" onClick={deselectImg} className="ml-auto p-1.5 rounded hover:bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))]"><X size={14} /></button>
         </div>
       )}
@@ -428,6 +467,14 @@ function HomePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [shareMenuId, setShareMenuId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const filteredAnnouncements = searchQuery.trim()
+    ? announcements.filter((a: any) =>
+        a.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        a.tag?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : announcements;
 
   useEffect(() => {
     if (shareMenuId === null) return;
@@ -435,6 +482,13 @@ function HomePage() {
     document.addEventListener("click", close, { capture: true });
     return () => document.removeEventListener("click", close, { capture: true });
   }, [shareMenuId]);
+
+  useEffect(() => {
+    if (!lightboxSrc) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxSrc(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [lightboxSrc]);
 
   const resetForm = () => {
     setFormTitle("");
@@ -520,12 +574,14 @@ function HomePage() {
     setShowAddForm(true);
   };
 
+  const getAnnouncementUrl = (a: any) => `${window.location.origin}/announcements/${a.id}`;
+
   const getAnnouncementText = (a: any) => {
-    return `${a.title}\n${window.location.origin}`;
+    return `${a.title}\n${getAnnouncementUrl(a)}`;
   };
 
   const handleShare = async (a: any) => {
-    const url = window.location.origin;
+    const url = getAnnouncementUrl(a);
     const text = getAnnouncementText(a);
     if (navigator.share) {
       try {
@@ -539,8 +595,7 @@ function HomePage() {
   };
 
   const handleCopyLink = async (id: number, a: any) => {
-    const text = getAnnouncementText(a);
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(getAnnouncementUrl(a));
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
     setShareMenuId(null);
@@ -589,6 +644,19 @@ function HomePage() {
           <h3 className="text-2xl font-bold tracking-tight">
             Recent News & Announcements
           </h3>
+          <div className="flex items-center gap-3 flex-wrap">
+            {announcements.length > 2 && (
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))]" />
+                <input
+                  type="text"
+                  placeholder="Search announcements..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-2 rounded-full text-sm bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] focus:outline-none focus:border-blue-500 w-48"
+                />
+              </div>
+            )}
           {isAdmin && (
             <button
               onClick={() => { resetForm(); setShowAddForm(true); }}
@@ -598,6 +666,7 @@ function HomePage() {
               Add
             </button>
           )}
+          </div>
         </div>
 
         {showAddForm && (
@@ -664,7 +733,7 @@ function HomePage() {
           {announcements.length > 0 ? (
             (() => {
               let nonPinnedCount = 0;
-              return announcements.map((a: any, index: number) => {
+              return filteredAnnouncements.map((a: any, index: number) => {
                 if (!a.pinned) nonPinnedCount++;
                 const number = a.pinned ? null : nonPinnedCount;
                 return (
@@ -703,7 +772,7 @@ function HomePage() {
                               {shareMenuId === a.id && (
                                 <div className="absolute right-0 top-8 z-50 w-52 glass border border-[rgb(var(--border-soft))] rounded-xl shadow-lg overflow-hidden">
                                   <a
-                                    href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.origin)}&quote=${encodeURIComponent(getAnnouncementText(a))}`}
+                                    href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(getAnnouncementUrl(a))}&quote=${encodeURIComponent(a.title)}`}
                                     target="_blank"
                                     rel="noreferrer"
                                     onClick={() => setShareMenuId(null)}
@@ -713,7 +782,7 @@ function HomePage() {
                                     Share on Facebook
                                   </a>
                                   <a
-                                    href={`https://wa.me/?text=${encodeURIComponent(getAnnouncementText(a))}`}
+                                    href={`https://wa.me/?text=${encodeURIComponent(a.title + '\n' + getAnnouncementUrl(a))}`}
                                     target="_blank"
                                     rel="noreferrer"
                                     onClick={() => setShareMenuId(null)}
@@ -723,7 +792,7 @@ function HomePage() {
                                     Share on WhatsApp
                                   </a>
                                   <a
-                                    href={`https://www.facebook.com/dialog/send?link=${encodeURIComponent(window.location.origin)}&app_id=291494979117269&redirect_uri=${encodeURIComponent(window.location.origin)}`}
+                                    href={`https://www.facebook.com/dialog/send?link=${encodeURIComponent(getAnnouncementUrl(a))}&app_id=291494979117269&redirect_uri=${encodeURIComponent(window.location.origin)}`}
                                     target="_blank"
                                     rel="noreferrer"
                                     onClick={() => setShareMenuId(null)}
@@ -770,7 +839,18 @@ function HomePage() {
                           </div>
                         </div>
                         <h4 className="text-lg font-semibold mt-3 mb-2">{a.title}</h4>
-                        <div className="text-sm text-[rgb(var(--muted-fg))] announcement-body" dangerouslySetInnerHTML={{ __html: a.body }} />
+                        <div
+                          className="text-sm text-[rgb(var(--muted-fg))] announcement-body"
+                          dangerouslySetInnerHTML={{ __html: a.body }}
+                          onClick={(e) => {
+                            const t = e.target as HTMLElement;
+                            if (t.tagName === 'IMG') {
+                              e.stopPropagation();
+                              setLightboxSrc((t as HTMLImageElement).src);
+                            }
+                          }}
+                        />
+                        <AnnouncementReactions announcementId={a.id} />
                       </div>
                     </div>
                   </div>
@@ -794,6 +874,27 @@ function HomePage() {
       </section>
 
       <ToastBar toast={toast} />
+      {/* Image lightbox */}
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <button
+            onClick={() => setLightboxSrc(null)}
+            className="absolute top-4 right-4 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full p-2 transition-colors"
+            aria-label="Close"
+          >
+            <X size={20} />
+          </button>
+          <img
+            src={lightboxSrc}
+            alt="Full size preview"
+            className="max-w-full max-h-[90vh] rounded-xl shadow-2xl object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </main>
   );
 }
