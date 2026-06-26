@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { db } from "../../db/index.js";
 import { tournaments, playerStats } from "../../db/schema.js";
-import { eq, sql, inArray } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { withRetry } from "@/lib/db-retry";
 import { getAdminUser } from "@/lib/auth-server";
 
@@ -32,6 +32,29 @@ export const getTournaments = createServerFn({ method: "GET" }).handler(
         }
       }
 
+      // Community tags per tournament (many-to-many via tournament_communities).
+      // Wrapped in try/catch so the schedules page still loads if the communities
+      // migration hasn't been applied to the live Neon branch yet.
+      let communityMap: Record<string, { id: number; slug: string; name: string }[]> = {};
+      if (tournamentIds.length > 0) {
+        try {
+          const tagRows = await db.execute(sql`
+            SELECT tc.tournament_external_id, c.id, c.slug, c.name
+            FROM tournament_communities tc
+            JOIN communities c ON c.id = tc.community_id
+            WHERE tc.tournament_external_id = ANY(${tournamentIds})
+            ORDER BY c.name ASC
+          `);
+          for (const row of tagRows.rows as any[]) {
+            const key = row.tournament_external_id as string;
+            if (!communityMap[key]) communityMap[key] = [];
+            communityMap[key].push({ id: Number(row.id), slug: row.slug, name: row.name });
+          }
+        } catch (err) {
+          console.error("community tag lookup skipped (is the migration applied?):", err);
+        }
+      }
+
       return rows.map((r) => ({
         id: r.externalId,
         name: r.name,
@@ -39,6 +62,7 @@ export const getTournaments = createServerFn({ method: "GET" }).handler(
         createdAt: r.createdAt?.getTime() ?? Date.now(),
         matchesPlayed: matchCounts[r.externalId] ?? 0,
         matchesTotal: 0, // populated client-side from tournament state
+        communities: communityMap[r.externalId] ?? [],
       }));
     });
   },
@@ -62,6 +86,7 @@ export const createTournament = createServerFn({ method: "POST" })
         name: row.name,
         archived: row.archived,
         createdAt: row.createdAt?.getTime() ?? Date.now(),
+        communities: [] as { id: string; slug: string; name: string }[],
       };
     });
   });
@@ -90,6 +115,7 @@ export const deleteTournament = createServerFn({ method: 'POST' })
       // player_stats has no foreign key to tournaments, so without this the rows would be
       // orphaned — invisible (no schedule to open) yet still summed into the combined
       // leaderboard totals.
+      // (tournament_communities rows are removed automatically by ON DELETE CASCADE.)
       await db.delete(playerStats)
         .where(eq(playerStats.teamId, data.id))
       await db.delete(tournaments)
