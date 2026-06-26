@@ -265,3 +265,14 @@ input[type="number"] {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* ── Append these rules to the END of src/styles.css ──────────────────────────
+   In-editor image sizing: visual cue while editing (never persisted — stripped on save).
+   Requires the --accent-500 token (already present if the theme work is deployed; if not,
+   replace rgb(var(--accent-500)) with rgb(0 113 227) for the default blue outline). */
+.announcement-body[contenteditable] img {
+  cursor: pointer;
+}
+.announcement-body[contenteditable] img.tr-img-sel {
+  outline: 2px solid rgb(var(--accent-500));
+  outline-offset: 2px;
+}
