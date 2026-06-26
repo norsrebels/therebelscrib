@@ -446,3 +446,72 @@ export const getMyActivity = createServerFn({ method: 'GET' })
       }
     })
   })
+
+// ─── Announcement Reactions ───────────────────────────────────────────────────
+
+export const upsertAnnouncementReaction = createServerFn({ method: 'POST' })
+  .inputValidator((data: { announcementId: number; reaction: string }) => data)
+  .handler(async ({ data }) => {
+    const identity = await requireMember()
+    return withRetry(async () => {
+      await db.execute(sql`
+        INSERT INTO announcement_reactions
+          (netlify_user_id, netlify_email, announcement_id, reaction)
+        VALUES
+          (${identity.userId}, ${identity.email}, ${data.announcementId}, ${data.reaction})
+        ON CONFLICT (netlify_user_id, announcement_id)
+        DO UPDATE SET reaction = ${data.reaction}
+      `)
+      return { ok: true }
+    })
+  })
+
+export const removeAnnouncementReaction = createServerFn({ method: 'POST' })
+  .inputValidator((data: { announcementId: number }) => data)
+  .handler(async ({ data }) => {
+    const identity = await requireMember()
+    return withRetry(async () => {
+      await db.execute(sql`
+        DELETE FROM announcement_reactions
+        WHERE netlify_user_id = ${identity.userId}
+          AND announcement_id = ${data.announcementId}
+      `)
+      return { ok: true }
+    })
+  })
+
+export const getAnnouncementReactions = createServerFn({ method: 'POST' })
+  .inputValidator((data: { announcementIds: number[] }) => data)
+  .handler(async ({ data }) => {
+    const identity = await getStatIdentity()
+    return withRetry(async () => {
+      if (data.announcementIds.length === 0) return { counts: {}, mine: {} }
+      // Use sql.raw for integer array — safe (values are DB PKs, not user input)
+      const idList = sql.raw(data.announcementIds.join(','))
+      const countRows = await db.execute(sql`
+        SELECT announcement_id, reaction, COUNT(*) as count
+        FROM announcement_reactions
+        WHERE announcement_id = ANY(ARRAY[${idList}]::integer[])
+        GROUP BY announcement_id, reaction
+      `)
+      const myRows = identity
+        ? await db.execute(sql`
+            SELECT announcement_id, reaction FROM announcement_reactions
+            WHERE netlify_user_id = ${identity.userId}
+              AND announcement_id = ANY(ARRAY[${idList}]::integer[])
+          `)
+        : { rows: [] }
+
+      const counts: Record<number, Record<string, number>> = {}
+      for (const row of countRows.rows as any[]) {
+        const id = Number(row.announcement_id)
+        if (!counts[id]) counts[id] = {}
+        counts[id][row.reaction] = Number(row.count)
+      }
+      const mine: Record<number, string> = {}
+      for (const row of myRows.rows as any[]) {
+        mine[Number(row.announcement_id)] = row.reaction
+      }
+      return { counts, mine }
+    })
+  })
