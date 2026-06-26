@@ -19,10 +19,12 @@ import {
 
   BarChart2,
   Vote,
+  UsersRound,
+  MessageSquare,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
-import { useAuth, getUserDisplayName } from '@/lib/auth-client'
+import { useAuth } from '@/lib/auth-client'
 import { logout } from '@netlify/identity'
 
 function cn(...classes: (string | undefined | false | null)[]) {
@@ -36,11 +38,15 @@ const NAV_ITEMS = [
   { path: '/gallery', label: 'Gallery', icon: Image },
   { path: '/polls', label: 'Polls', icon: Vote },
   { path: '/social', label: 'Social Media', icon: Share2 },
+  { path: '/communities', label: 'Communities', icon: UsersRound },
+  { path: '/chat', label: 'Chat', icon: MessageSquare },
   { path: '/leaderboard', label: 'Player Statistics', icon: BarChart2 },
 ]
 
-// Mobile bottom nav: Home, Player Dex, Tournaments, Player Statistics
-const BOTTOM_NAV_ITEMS = [NAV_ITEMS[0], NAV_ITEMS[1], NAV_ITEMS[2], NAV_ITEMS[6]]
+// Mobile bottom nav: Home, Player Dex, Tournaments, Player Statistics.
+// NOTE: these are index references into NAV_ITEMS — update them whenever items are
+// inserted/removed above. Player Statistics is the LAST item, so it tracks the array.
+const BOTTOM_NAV_ITEMS = [NAV_ITEMS[0], NAV_ITEMS[1], NAV_ITEMS[2], NAV_ITEMS[NAV_ITEMS.length - 1]]
 
 type ThemeMode = 'light' | 'dark' | 'system'
 
