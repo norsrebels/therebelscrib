@@ -12,10 +12,24 @@ const sanitizeHtml = (html: string) => {
       "b", "strong", "i", "em", "u", "ul", "ol", "li", "br", "p", "img", "div", "iframe", "video"
     ],
     allowedAttributes: {
-      img: ["src", "alt", "class", "width", "height"],
+      img: ["src", "alt", "class", "width", "height", "style"],
       iframe: ["src", "class", "allowfullscreen"],
       div: ["class"],
-      video: ["src", "controls", "class"],
+      video: ["src", "controls", "class", "style"],
+      p: ["style"],
+    },
+    allowedStyles: {
+      img: {
+        width: [/^\d+(\.\d+)?%$/, /^\d+px$/],
+        height: [/.*/],
+        display: [/^block$/, /^inline$/, /^inline-block$/],
+        "margin-left": [/.*/],
+        "margin-right": [/.*/],
+      },
+      video: {
+        width: [/^\d+(\.\d+)?%$/, /^\d+px$/],
+        height: [/.*/],
+      },
     },
     allowedIframeHostnames: ["www.youtube.com", "youtube.com", "player.vimeo.com"],
   });
