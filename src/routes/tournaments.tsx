@@ -18,6 +18,9 @@ import {
   CheckCircle2,
   PlayCircle,
   Circle,
+  Tags,
+  UsersRound,
+  Check,
 } from "lucide-react";
 import TournamentApp from "@/components/TournamentApp";
 import { useAuth } from "@/lib/auth-client";
@@ -27,10 +30,16 @@ import {
   toggleArchiveTournament,
   deleteTournament,
 } from "@/server/tournament.functions";
+import {
+  getCommunities,
+  setTournamentCommunities,
+} from "@/server/community.functions";
 import { ConfirmationModal } from "@/components/Modals";
 import { useLoading } from "@/lib/loading-context";
 import { useToast } from "@/lib/use-toast";
 import { ToastBar } from "@/components/Modals";
+
+type CommunityTag = { id: number; slug: string; name: string };
 
 interface ScheduleItem {
   id: string;
@@ -39,6 +48,7 @@ interface ScheduleItem {
   createdAt: number;
   matchesPlayed?: number;
   matchesTotal?: number;
+  communities?: CommunityTag[];
 }
 
 // Derive tournament status from match counts
@@ -61,19 +71,26 @@ function getTournamentStatus(s: ScheduleItem): {
 export const Route = createFileRoute("/tournaments")({
   validateSearch: (search: Record<string, unknown>) => ({
     id: typeof search.id === "string" ? search.id.trim() : undefined,
+    community: typeof search.community === "string" ? search.community.trim() : undefined,
   }),
   loader: async () => {
-    const schedules = await getTournaments();
-    return { schedules };
+    const [schedules, communities] = await Promise.all([
+      getTournaments(),
+      getCommunities(),
+    ]);
+    return { schedules, communities };
   },
   component: TournamentsPage,
 });
 
 function TournamentsPage() {
-  const { id } = Route.useSearch();
+  const { id, community: communityFilter } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const loaderData = Route.useLoaderData();
   const [schedules, setSchedules] = useState<ScheduleItem[]>(loaderData.schedules);
+  const [allCommunities] = useState<CommunityTag[]>(
+    (loaderData.communities ?? []).map((c: any) => ({ id: c.id, slug: c.slug, name: c.name })),
+  );
   const [showArchived, setShowArchived] = useState(false);
   const [sortBy, setSortBy] = useState<"date" | "name">("date");
   const [searchQuery, setSearchQuery] = useState("");
@@ -86,11 +103,24 @@ function TournamentsPage() {
   } | null>(null);
   const [showNewScheduleModal, setShowNewScheduleModal] = useState(false);
   const [newScheduleName, setNewScheduleName] = useState("");
+  const [newScheduleCommunityIds, setNewScheduleCommunityIds] = useState<number[]>([]);
   const [deleteTournamentConfirm, setDeleteTournamentConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [tagModalSchedule, setTagModalSchedule] = useState<ScheduleItem | null>(null);
 
   useEffect(() => {
     setSchedules(loaderData.schedules);
   }, [loaderData.schedules]);
+
+  // Communities that appear on at least one schedule — drives the filter pills.
+  const communitiesInUse = useMemo(() => {
+    const map = new Map<string, CommunityTag>();
+    schedules.forEach((s) => s.communities?.forEach((c) => map.set(c.slug, c)));
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [schedules]);
+
+  const setCommunityFilter = (slug: string | undefined) => {
+    navigate({ search: (prev) => ({ ...prev, community: slug || undefined }) });
+  };
 
   const addSchedule = async () => {
     if (!isAdmin) {
@@ -108,9 +138,18 @@ function TournamentsPage() {
       const created = await createTournament({
         data: { id: newId, name: newScheduleName.trim() },
       });
-      setSchedules((prev) => [...prev, created]);
+      // Apply community tags chosen in the modal (many-to-many).
+      let tags: CommunityTag[] = [];
+      if (newScheduleCommunityIds.length > 0) {
+        await setTournamentCommunities({
+          data: { tournamentExternalId: newId, communityIds: newScheduleCommunityIds },
+        });
+        tags = allCommunities.filter((c) => newScheduleCommunityIds.includes(c.id));
+      }
+      setSchedules((prev) => [...prev, { ...created, communities: tags }]);
       setNewScheduleName("");
-      navigate({ search: { id: newId } });
+      setNewScheduleCommunityIds([]);
+      navigate({ search: { id: newId, community: undefined } });
     } catch (e) {
       console.error(e);
       showToast("Failed to create schedule", "error");
@@ -141,6 +180,23 @@ function TournamentsPage() {
     } catch (e) {
       console.error(e);
       showToast("Failed to delete schedule", "error");
+    }
+  };
+
+  const handleSaveTags = async (scheduleId: string, communityIds: number[]) => {
+    try {
+      await setTournamentCommunities({
+        data: { tournamentExternalId: scheduleId, communityIds },
+      });
+      const tags = allCommunities.filter((c) => communityIds.includes(c.id));
+      setSchedules((prev) =>
+        prev.map((s) => (s.id === scheduleId ? { ...s, communities: tags } : s)),
+      );
+      setTagModalSchedule(null);
+      showToast("Communities updated", "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Failed to update communities", "error");
     }
   };
 
@@ -193,6 +249,8 @@ function TournamentsPage() {
     showArchived ? s.archived : !s.archived,
   ).filter((s) =>
     searchQuery.trim() === "" || s.name.toLowerCase().includes(searchQuery.toLowerCase())
+  ).filter((s) =>
+    !communityFilter || (s.communities ?? []).some((c) => c.slug === communityFilter)
   );
   const sortedSchedules = [...filteredSchedules].sort((a, b) => {
     if (sortBy === "name") return a.name.localeCompare(b.name);
@@ -201,7 +259,7 @@ function TournamentsPage() {
 
   return (
     <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-      
+
 
       {confirmAction && (
         <ConfirmationModal
@@ -232,9 +290,39 @@ function TournamentsPage() {
               className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-xl px-4 py-2.5 text-sm mb-4 outline-none focus:border-blue-500"
               autoFocus
             />
+            {allCommunities.length > 0 && (
+              <div className="mb-4">
+                <label className="text-xs font-medium text-[rgb(var(--muted-fg))] mb-2 flex items-center gap-1.5">
+                  <UsersRound size={13} /> Communities (optional)
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {allCommunities.map((c) => {
+                    const selected = newScheduleCommunityIds.includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() =>
+                          setNewScheduleCommunityIds((prev) =>
+                            selected ? prev.filter((x) => x !== c.id) : [...prev, c.id],
+                          )
+                        }
+                        className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[13px] font-medium border transition-colors ${
+                          selected
+                            ? "bg-blue-500/10 text-blue-500 border-blue-500/30"
+                            : "border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]"
+                        }`}
+                      >
+                        {selected && <Check size={12} />} {c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => { setShowNewScheduleModal(false); setNewScheduleName(""); }}
+                onClick={() => { setShowNewScheduleModal(false); setNewScheduleName(""); setNewScheduleCommunityIds([]); }}
                 className="px-5 py-2.5 rounded-xl text-sm font-bold bg-[rgb(var(--surface-hover))] border border-[rgb(var(--border-soft))] hover:bg-[rgb(var(--border-soft))] transition-colors"
               >
                 Cancel
@@ -249,6 +337,15 @@ function TournamentsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {tagModalSchedule && (
+        <TagModal
+          schedule={tagModalSchedule}
+          allCommunities={allCommunities}
+          onSave={handleSaveTags}
+          onClose={() => setTagModalSchedule(null)}
+        />
       )}
 
       {deleteTournamentConfirm && (
@@ -341,6 +438,35 @@ function TournamentsPage() {
         </div>
       </div>
 
+      {/* Community filter pills */}
+      {communitiesInUse.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap mb-8">
+          <button
+            onClick={() => setCommunityFilter(undefined)}
+            className={`px-3.5 py-1.5 rounded-full text-[13px] font-medium border transition-colors ${
+              !communityFilter
+                ? "bg-blue-500/10 text-blue-500 border-blue-500/30"
+                : "border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]"
+            }`}
+          >
+            All
+          </button>
+          {communitiesInUse.map((c) => (
+            <button
+              key={c.slug}
+              onClick={() => setCommunityFilter(c.slug)}
+              className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[13px] font-medium border transition-colors ${
+                communityFilter === c.slug
+                  ? "bg-blue-500/10 text-blue-500 border-blue-500/30"
+                  : "border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]"
+              }`}
+            >
+              <UsersRound size={12} /> {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {schedules.length === 0 ? (
         <div className="text-center py-24 border border-[rgb(var(--border-soft))] rounded-3xl bg-[rgb(var(--surface))] shadow-sm">
           <div className="w-16 h-16 mx-auto mb-4 bg-[rgb(var(--surface-hover))] rounded-full flex items-center justify-center text-[rgb(var(--muted-fg))]">
@@ -367,9 +493,11 @@ function TournamentsPage() {
       ) : sortedSchedules.length === 0 ? (
         <div className="text-center py-24 border border-dashed border-[rgb(var(--border-soft))] rounded-3xl">
           <p className="text-[rgb(var(--muted-fg))] text-sm">
-            {showArchived
-              ? "No archived schedules."
-              : "All schedules are archived. Toggle \"Show Archived\" to view them."}
+            {communityFilter
+              ? "No schedules in this community yet."
+              : showArchived
+                ? "No archived schedules."
+                : "All schedules are archived. Toggle \"Show Archived\" to view them."}
           </p>
         </div>
       ) : (
@@ -399,6 +527,21 @@ function TournamentsPage() {
                     <p className="text-[13px] text-[rgb(var(--muted-fg))]">
                       ID: {s.id}
                     </p>
+                    {/* Community badges */}
+                    {(s.communities ?? []).length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                        {(s.communities ?? []).map((c) => (
+                          <button
+                            key={c.slug}
+                            onClick={() => setCommunityFilter(c.slug)}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-500/10 text-blue-500 border border-blue-500/20 hover:bg-blue-500/20 transition-colors"
+                            title={`Filter by ${c.name}`}
+                          >
+                            <UsersRound size={10} /> {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {/* Match count summary */}
                     {(s.matchesTotal ?? 0) > 0 && (
                       <p className="text-[12px] text-[rgb(var(--muted-fg))] mt-1 flex items-center gap-1.5">
@@ -415,6 +558,18 @@ function TournamentsPage() {
                   </div>
                   {isAdmin && (
                     <div className="flex items-center gap-1">
+                      {allCommunities.length > 0 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTagModalSchedule(s);
+                          }}
+                          className="text-[rgb(var(--muted-fg))] hover:text-blue-500 p-1.5 rounded-full hover:bg-blue-500/10 transition-colors"
+                          title="Edit communities"
+                        >
+                          <Tags size={18} />
+                        </button>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -452,7 +607,7 @@ function TournamentsPage() {
                 <div className="flex flex-col gap-2 mb-4">
                   {isAdmin && (
                     <button
-                      onClick={() => navigate({ search: { id: s.id } })}
+                      onClick={() => navigate({ search: { id: s.id, community: undefined } })}
                       className="w-full text-center text-[14px] font-medium rounded-xl px-4 py-2.5 bg-[rgb(var(--surface-hover))] hover:bg-[rgb(var(--border-soft))] transition-colors"
                     >
                       Edit Schedule
@@ -484,5 +639,78 @@ function TournamentsPage() {
       )}
       <ToastBar toast={toast} />
     </main>
+  );
+}
+
+// ─── Community tag editor (admin) ─────────────────────────────────────────────
+
+function TagModal({
+  schedule,
+  allCommunities,
+  onSave,
+  onClose,
+}: {
+  schedule: ScheduleItem;
+  allCommunities: CommunityTag[];
+  onSave: (scheduleId: string, communityIds: number[]) => void;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState<number[]>(
+    (schedule.communities ?? []).map((c) => c.id),
+  );
+  const [saving, setSaving] = useState(false);
+
+  const toggle = (id: number) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] rounded-2xl shadow-2xl max-w-md w-full p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-xl font-bold tracking-tight">Communities</h3>
+          <button onClick={onClose} className="text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]"><X size={18} /></button>
+        </div>
+        <p className="text-sm text-[rgb(var(--muted-fg))] mb-4 truncate">{schedule.name}</p>
+        {allCommunities.length === 0 ? (
+          <p className="text-sm text-[rgb(var(--muted-fg))] py-4">No communities exist yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2 mb-5">
+            {allCommunities.map((c) => {
+              const on = selected.includes(c.id);
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => toggle(c.id)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[13px] font-medium border transition-colors ${
+                    on
+                      ? "bg-blue-500/10 text-blue-500 border-blue-500/30"
+                      : "border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]"
+                  }`}
+                >
+                  {on && <Check size={12} />} {c.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={onClose}
+            className="px-5 py-2.5 rounded-xl text-sm font-bold bg-[rgb(var(--surface-hover))] border border-[rgb(var(--border-soft))] hover:bg-[rgb(var(--border-soft))] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => { setSaving(true); onSave(schedule.id, selected); }}
+            disabled={saving}
+            className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-500 transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />} Save
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
