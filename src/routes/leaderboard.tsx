@@ -51,6 +51,8 @@ const POSITION_ALIASES: Record<string, string> = {
   s: 'S', setter: 'S',
   l: 'L', libero: 'L',
 }
+const POSITION_ORDER = ['OS', 'OPP', 'MB', 'S', 'L'] as const
+
 function normPosition(raw: string | null | undefined): string {
   if (!raw) return ''
   const k = raw.trim().toLowerCase()
@@ -178,10 +180,9 @@ function PlayerStatsPage() {
     })
   }, [stats, playerMap])
 
-  const availablePositions = useMemo(
-    () => Array.from(new Set(aggregated.map(p => p.position).filter(Boolean))).sort(),
-    [aggregated],
-  )
+  // Always offer the full canonical position set (not just positions present in the
+  // currently-loaded stats), so the filter is usable the moment a schedule is picked.
+  const availablePositions = POSITION_ORDER
 
   const ranked = useMemo(() => {
     let f = selectedPositionFilter
@@ -399,12 +400,22 @@ function PlayerStatsPage() {
               </div>
               {isLowerBetter && <span className="text-[9px] font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/10">lower is better</span>}
             </div>
-            {ranked.length === 0 ? (
+            {!selectedScheduleId ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center select-none">
+                <img
+                  src="/logo.png"
+                  alt=""
+                  aria-hidden
+                  className="w-28 h-28 object-contain opacity-10 mb-6"
+                />
+                <h3 className="text-base font-bold text-[rgb(var(--fg))] mb-1">Pick a schedule to begin</h3>
+                <p className="text-sm text-[rgb(var(--muted-fg))] max-w-xs">
+                  Choose a tournament schedule above and the rankings for that event will load here.
+                </p>
+              </div>
+            ) : ranked.length === 0 ? (
               <div className="text-center py-16 text-[rgb(var(--muted-fg))] text-sm font-medium">
-                {!selectedScheduleId
-                  ? <span>Pick a schedule from the dropdown above to see the rankings.</span>
-                  : <span>No statistical data recorded yet for this schedule.</span>
-                }
+                No statistical data recorded yet for this schedule.
               </div>
             ) : leaderboardList.length === 0 && podium.length > 0 ? (
               <div className="text-center py-6 text-[rgb(var(--muted-fg))] text-[11px] font-medium">Showing all filtered records on the podium above.</div>
