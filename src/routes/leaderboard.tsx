@@ -20,7 +20,7 @@ import {
   fmtPts,
   aggregateTeamStats,
 } from '@/lib/stats/formulas'
-import { BarChart2, X, ChevronDown, Download, Copy, Check, Users, Trophy, ArrowRightLeft } from 'lucide-react'
+import { BarChart2, X, ChevronDown, Download, Trophy, ArrowRightLeft } from 'lucide-react'
 
 const MIN_ATTACK_ATT  = 10
 const MIN_SERVE_ATT   = 10
@@ -85,7 +85,6 @@ function PlayerStatsPage() {
   const navigate = Route.useNavigate()
   const [selectedRanking, setSelectedRanking] = useState<RankingKey>('totalPts')
   const [selectedPlayer, setSelectedPlayer] = useState<number | null>(null)
-  const [copiedId, setCopiedId] = useState<number | null>(null)
   
   const [isCompareOpen, setIsCompareOpen] = useState(false)
   const [comparePlayerA, setComparePlayerA] = useState<number | ''>('')
@@ -180,7 +179,7 @@ function PlayerStatsPage() {
       case 'attackEff':       f = f.filter(p => (p.attackKill + p.attackError + p.attackAttempt) >= MIN_ATTACK_ATT); f.sort((a, b) => (b.attackEffVal ?? -1) - (a.attackEffVal ?? -1)); break
       case 'aces':            f.sort((a, b) => b.serveAce - a.serveAce); break
       case 'acePct':          f = f.filter(p => (p.serveAce + p.serveError + p.serveAttempt) >= MIN_SERVE_ATT); f.sort((a, b) => (b.acePctVal ?? -1) - (a.acePctVal ?? -1)); break
-      case 'passEff':         f = f.filter(p => p.totalRec >= MIN_RECEPTIONS); f.sort((a, b) => (b.passEffVal ?? -1) - (b.passEffVal ?? -1)); break
+      case 'passEff':         f = f.filter(p => p.totalRec >= MIN_RECEPTIONS); f.sort((a, b) => (b.passEffVal ?? -1) - (a.passEffVal ?? -1)); break
       case 'recErrPct':       f = f.filter(p => p.totalRec >= MIN_RECEPTIONS); f.sort((a, b) => (a.recErrPctVal ?? 101) - (b.recErrPctVal ?? 101)); break
       case 'setAssistPerSet': f = f.filter(p => p.totalSets >= MIN_SETS); f.sort((a, b) => (b.setAssistPerSetVal ?? 0) - (a.setAssistPerSetVal ?? 0)); break
       case 'setEff':          f = f.filter(p => (p.setAssist + p.setBallHandlingError) >= MIN_SET_ATT); f.sort((a, b) => (b.setEffVal ?? -1) - (a.setEffVal ?? -1)); break
@@ -386,7 +385,12 @@ function PlayerStatsPage() {
               {isLowerBetter && <span className="text-[9px] font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/10">lower is better</span>}
             </div>
             {ranked.length === 0 ? (
-              <div className="text-center py-16 text-[rgb(var(--muted-fg))] text-sm font-medium">No statistical data recorded yet.</div>
+              <div className="text-center py-16 text-[rgb(var(--muted-fg))] text-sm font-medium">
+                {!selectedScheduleId
+                  ? <span>Pick a schedule from the dropdown above to see the rankings.</span>
+                  : <span>No statistical data recorded yet for this schedule.</span>
+                }
+              </div>
             ) : leaderboardList.length === 0 && podium.length > 0 ? (
               <div className="text-center py-6 text-[rgb(var(--muted-fg))] text-[11px] font-medium">Showing all filtered records on the podium above.</div>
             ) : (
