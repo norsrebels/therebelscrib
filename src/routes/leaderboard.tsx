@@ -23,8 +23,8 @@ import {
 import { BarChart2, X, ChevronDown, Download, Trophy, ArrowRightLeft } from 'lucide-react'
 
 const MIN_ATTACK_ATT  = 10
-const MIN_SERVE_ATT   = 10
-const MIN_RECEPTIONS  = 10
+const MIN_SERVE_ATT   = 5
+const MIN_RECEPTIONS  = 5
 const MIN_SET_ATT     = 10
 const MIN_DIG_ATT     = 5
 const MIN_SETS        = 2
