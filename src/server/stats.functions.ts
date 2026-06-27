@@ -2,10 +2,10 @@ import { createServerFn } from '@tanstack/react-start'
 import { getRequestIP } from '@tanstack/react-start/server'
 import { db } from '../../db/index.js'
 import { players, playerStats, auditLog, tournaments } from '../../db/schema.js'
-import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm'
+import { eq, and, desc, gte, lte, sql } from 'drizzle-orm'
 import { withRetry } from '@/lib/db-retry'
 import type { StatField } from '@/lib/stats/formulas'
-import { getStatIdentity, requireStatAccess } from '@/lib/auth-server'
+import { getStatIdentity } from '@/lib/auth-server'
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -299,8 +299,8 @@ export const updatePlayerJersey = createServerFn({ method: 'POST' })
       await insertAudit({
         netlifyUserId: identity?.userId ?? null,
         netlifyEmail: identity?.email ?? null,
-        username: identity?.email ?? "unknown" ?? 'admin',
-        userRole: identity?.role ?? "viewer" ?? 'admin',
+        username: identity?.email ?? "unknown",
+        userRole: identity?.role ?? "viewer",
         action: 'ROSTER_UPDATE',
         entityType: 'player',
         entityId: String(data.playerId),
@@ -350,8 +350,8 @@ export const importPlayers = createServerFn({ method: 'POST' })
       await insertAudit({
         netlifyUserId: identity?.userId ?? null,
         netlifyEmail: identity?.email ?? null,
-        username: identity?.email ?? "unknown" ?? 'admin',
-        userRole: identity?.role ?? "viewer" ?? 'admin',
+        username: identity?.email ?? "unknown",
+        userRole: identity?.role ?? "viewer",
         action: 'ROSTER_UPDATE',
         entityType: 'import',
         newValue: JSON.stringify({ count: results.length, teamId: data.teamId }),
@@ -421,17 +421,12 @@ export const getAllPlayerStats = createServerFn({ method: 'GET' })
 
       let stats: any[]
       if (data.tournamentId) {
-        const matchRows = await db.selectDistinct({ matchId: playerStats.matchId })
-          .from(playerStats)
+        // Filter directly by teamId (= tournament externalId). This is the correct
+        // single-step approach now that stale team_id rows have been retagged.
+        // The previous two-step matchId-based approach could cross-contaminate stats
+        // from different tournaments that share the same internal game id (e.g. "pool-A-1").
+        stats = await db.select().from(playerStats)
           .where(eq(playerStats.teamId, data.tournamentId))
-        const matchIds = matchRows.map(r => r.matchId)
-
-        if (matchIds.length > 0) {
-          stats = await db.select().from(playerStats)
-            .where(inArray(playerStats.matchId, matchIds))
-        } else {
-          stats = []
-        }
       } else {
         stats = await db.select().from(playerStats)
       }
