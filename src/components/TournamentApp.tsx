@@ -32,6 +32,7 @@ import {
 } from "@/lib/tournament";
 import { useToast } from "@/lib/use-toast";
 import { ToastBar } from "@/components/Modals";
+import { LiveIntroSplash } from "@/components/LiveIntroSplash";
 import {
   Calendar,
   Lock,
@@ -1731,6 +1732,7 @@ type LiveGameCard = {
   isComplete: boolean;
   isOngoing: boolean;
   status: LiveGameStatus;
+  court: string | null;
 };
 
 function LiveView({
@@ -2825,7 +2827,9 @@ export default function TournamentApp({
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
         {defaultView === "players" ? (
-          <LiveView state={state} lastUpdated={lastUpdated} />
+          <LiveIntroSplash>
+            <LiveView state={state} lastUpdated={lastUpdated} />
+          </LiveIntroSplash>
         ) : (
           <>
             <div className="flex gap-1 mb-6 glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-1.5 overflow-x-auto">
