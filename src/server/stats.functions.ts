@@ -2,7 +2,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { getRequestIP } from '@tanstack/react-start/server'
 import { db } from '../../db/index.js'
 import { players, playerStats, auditLog, tournaments } from '../../db/schema.js'
-import { eq, and, desc, gte, lte, sql } from 'drizzle-orm'
+import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm'
 import { withRetry } from '@/lib/db-retry'
 import type { StatField } from '@/lib/stats/formulas'
 import { getStatIdentity } from '@/lib/auth-server'
@@ -421,12 +421,23 @@ export const getAllPlayerStats = createServerFn({ method: 'GET' })
 
       let stats: any[]
       if (data.tournamentId) {
-        // Filter directly by teamId (= tournament externalId). This is the correct
-        // single-step approach now that stale team_id rows have been retagged.
-        // The previous two-step matchId-based approach could cross-contaminate stats
-        // from different tournaments that share the same internal game id (e.g. "pool-A-1").
-        stats = await db.select().from(playerStats)
+        // Two-step (intentional): collect the match ids that belong to this tournament,
+        // then return every stat row for those matches. This acts as a safety net —
+        // if one row in a match has a stale team_id, it is still included because a
+        // sibling row in the same match carries the correct tournament tag. matchIds
+        // are tournament-scoped in practice (built from rebels_tournament_v2_<id> state
+        // and unique VIS match ids), so this does not pull in other tournaments' games.
+        const matchRows = await db.selectDistinct({ matchId: playerStats.matchId })
+          .from(playerStats)
           .where(eq(playerStats.teamId, data.tournamentId))
+        const matchIds = matchRows.map(r => r.matchId)
+
+        if (matchIds.length > 0) {
+          stats = await db.select().from(playerStats)
+            .where(inArray(playerStats.matchId, matchIds))
+        } else {
+          stats = []
+        }
       } else {
         stats = await db.select().from(playerStats)
       }
