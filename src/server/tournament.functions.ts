@@ -42,7 +42,7 @@ export const getTournaments = createServerFn({ method: "GET" }).handler(
             SELECT tc.tournament_external_id, c.id, c.slug, c.name
             FROM tournament_communities tc
             JOIN communities c ON c.id = tc.community_id
-            WHERE tc.tournament_external_id = ANY(${tournamentIds})
+            WHERE tc.tournament_external_id = ANY(${sql.raw("ARRAY['" + tournamentIds.join("','") + "']")})
             ORDER BY c.name ASC
           `);
           for (const row of tagRows.rows as any[]) {
