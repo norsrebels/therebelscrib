@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-client'
 import { logout } from '@netlify/identity'
+import { InstallAppButton } from '@/components/InstallAppButton'
 
 function cn(...classes: (string | undefined | false | null)[]) {
   return classes.filter(Boolean).join(' ')
@@ -203,6 +204,7 @@ export function Sidebar() {
             {themeIcon}
             {!collapsed && themeLabel}
           </button>
+          <InstallAppButton collapsed={collapsed} />
           {user ? (
             <>
               <Link
@@ -358,6 +360,7 @@ export function Sidebar() {
                 {themeIcon}
                 {themeLabel}
               </button>
+              <InstallAppButton />
               {user ? (
                 <>
                   <div className="px-3 py-2 text-xs text-[rgb(var(--muted-fg))] truncate">{user.email}</div>
