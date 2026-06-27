@@ -23,8 +23,8 @@ import {
 import { BarChart2, X, ChevronDown, Download, Trophy, ArrowRightLeft } from 'lucide-react'
 
 const MIN_ATTACK_ATT  = 10
-const MIN_SERVE_ATT   = 5
-const MIN_RECEPTIONS  = 5
+const MIN_SERVE_ATT   = 10
+const MIN_RECEPTIONS  = 10
 const MIN_SET_ATT     = 10
 const MIN_DIG_ATT     = 5
 const MIN_SETS        = 2
@@ -40,6 +40,21 @@ type RankingKey =
 
 const POSITION_LABELS: Record<string, string> = {
   OS: 'Open Spiker', OPP: 'Opposite Spiker', MB: 'Middle Blocker', S: 'Setter', L: 'Libero',
+}
+
+// Normalize a stored position to its canonical code, tolerant of legacy/full-word
+// values and stray casing/whitespace, so the filter always matches.
+const POSITION_ALIASES: Record<string, string> = {
+  os: 'OS', 'open spiker': 'OS', outside: 'OS', oh: 'OS', 'outside hitter': 'OS',
+  opp: 'OPP', 'opposite spiker': 'OPP', opposite: 'OPP',
+  mb: 'MB', 'middle blocker': 'MB', middle: 'MB',
+  s: 'S', setter: 'S',
+  l: 'L', libero: 'L',
+}
+function normPosition(raw: string | null | undefined): string {
+  if (!raw) return ''
+  const k = raw.trim().toLowerCase()
+  return POSITION_ALIASES[k] ?? raw.trim().toUpperCase()
 }
 
 const RANKINGS: { key: RankingKey; label: string; minLabel?: string; group: string }[] = [
@@ -142,7 +157,7 @@ function PlayerStatsPage() {
         playerId: pid,
         name: info?.nickname ?? `Player ${id}`,
         jersey: info?.jerseyNumber,
-        position: info?.position ?? '',
+        position: normPosition(info?.position),
         totalSets,
         totalRec: agg.receptionPerfect + agg.receptionGood + agg.receptionOk + agg.receptionError,
         totalDigAtt: agg.digAttempt > 0 ? agg.digAttempt : agg.dig + agg.digError,
@@ -272,7 +287,7 @@ function PlayerStatsPage() {
             <h1 className="text-2xl font-bold">Player Statistics</h1>
             <p className="text-sm text-[rgb(var(--muted-fg))] font-medium">
               {[
-                selectedScheduleName || 'All schedules',
+                selectedScheduleName || 'No schedule selected',
                 selectedPositionFilter ? (POSITION_LABELS[selectedPositionFilter] ?? selectedPositionFilter) : 'All positions',
               ].join(' · ')}
             </p>
@@ -282,8 +297,8 @@ function PlayerStatsPage() {
           {schedules.length > 0 && (
             <div className="relative">
               <select value={selectedScheduleId} onChange={handleScheduleChange}
-                className="appearance-none pl-4 pr-9 py-2.5 rounded-xl text-sm font-semibold bg-[rgb(var(--surface))] border border-[rgb(var(--border))] text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] focus:outline-none focus:ring-1 focus:ring-blue-550 cursor-pointer">
-                <option value="">All schedules</option>
+                className={`appearance-none pl-4 pr-9 py-2.5 rounded-xl text-sm font-semibold bg-[rgb(var(--surface))] border text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))] focus:outline-none focus:ring-1 focus:ring-blue-550 cursor-pointer ${!selectedScheduleId ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-[rgb(var(--border))]'}`}>
+                <option value="">— Pick a schedule —</option>
                 {schedules.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))]" size={14} />
