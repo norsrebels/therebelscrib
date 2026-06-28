@@ -1,11 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { DEFAULT_SYSTEM_PROMPT } from "@/server/chatbot.functions";
 import { db } from "../../db/index.js";
 import { siteSettings, players } from "../../db/schema.js";
 import { eq } from "drizzle-orm";
 import { withRetry, jsonResponse, errorResponse } from "@/lib/db-retry";
-
 
 export const Route = createFileRoute("/api/chat")({
   server: {
@@ -71,24 +70,36 @@ export const Route = createFileRoute("/api/chat")({
             }
           }
 
-          const anthropic = new Anthropic();
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (!apiKey) {
+            console.error("Chat API error: GEMINI_API_KEY is not set");
+            return errorResponse("Chatbot is not configured", 500);
+          }
 
-          const response = await anthropic.messages.create({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1024,
-            system: systemContent,
-            messages: body.messages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
+          const genAI = new GoogleGenerativeAI(apiKey);
+          const model = genAI.getGenerativeModel({
+            model: "gemini-1.5-flash",
+            systemInstruction: systemContent,
           });
 
-          const text =
-            response.content[0].type === "text" ? response.content[0].text : "";
+          // Gemini uses "model" for the assistant role. The final user turn is sent
+          // via sendMessage; everything before it becomes the chat history.
+          const history = body.messages.slice(0, -1).map((m) => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }],
+          }));
+
+          const chat = model.startChat({
+            history,
+            generationConfig: { maxOutputTokens: 1024 },
+          });
+
+          const result = await chat.sendMessage(lastMessage.content);
+          const text = result.response.text() || "";
 
           return jsonResponse({ reply: text });
         } catch (err: any) {
-          console.error("Chat API error:", err);
+          console.error("Chat API error:", err?.message || err);
           return errorResponse("Failed to generate response", 500);
         }
       },
