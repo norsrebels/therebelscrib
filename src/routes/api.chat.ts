@@ -1,10 +1,44 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { DEFAULT_SYSTEM_PROMPT } from "@/server/chatbot.functions";
 import { db } from "../../db/index.js";
 import { siteSettings, players } from "../../db/schema.js";
 import { eq } from "drizzle-orm";
 import { withRetry, jsonResponse, errorResponse } from "@/lib/db-retry";
+
+// Calls Gemini via raw fetch — no SDK, no bundling concerns, works in any runtime.
+async function callGemini(systemInstruction: string, messages: { role: string; content: string }[]): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+  // Build history: all turns except the last become chat history.
+  // Gemini uses "model" for the assistant role.
+  const contents = messages.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+
+  const body = {
+    system_instruction: { parts: [{ text: systemInstruction }] },
+    contents,
+    generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json() as any;
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+}
 
 export const Route = createFileRoute("/api/chat")({
   server: {
@@ -15,11 +49,7 @@ export const Route = createFileRoute("/api/chat")({
             messages: { role: "user" | "assistant"; content: string }[];
           };
 
-          if (
-            !body.messages ||
-            !Array.isArray(body.messages) ||
-            body.messages.length === 0
-          ) {
+          if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
             return errorResponse("Messages array is required", 400);
           }
 
@@ -30,14 +60,8 @@ export const Route = createFileRoute("/api/chat")({
 
           const [promptRow, faqsRow, roster] = await withRetry(() =>
             Promise.all([
-              db
-                .select()
-                .from(siteSettings)
-                .where(eq(siteSettings.key, "chatbot_system_prompt")),
-              db
-                .select()
-                .from(siteSettings)
-                .where(eq(siteSettings.key, "chatbot_faqs")),
+              db.select().from(siteSettings).where(eq(siteSettings.key, "chatbot_system_prompt")),
+              db.select().from(siteSettings).where(eq(siteSettings.key, "chatbot_faqs")),
               db.select().from(players),
             ]),
           );
@@ -47,9 +71,7 @@ export const Route = createFileRoute("/api/chat")({
           let faqs: { question: string; answer: string }[] = [];
           try {
             faqs = faqsRow[0]?.value ? JSON.parse(faqsRow[0].value) : [];
-          } catch {
-            faqs = [];
-          }
+          } catch { faqs = []; }
 
           let systemContent = customPrompt;
 
@@ -70,36 +92,11 @@ export const Route = createFileRoute("/api/chat")({
             }
           }
 
-          const apiKey = process.env.GEMINI_API_KEY;
-          if (!apiKey) {
-            console.error("Chat API error: GEMINI_API_KEY is not set");
-            return errorResponse("Chatbot is not configured", 500);
-          }
-
-          const genAI = new GoogleGenerativeAI(apiKey);
-          const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash",
-            systemInstruction: systemContent,
-          });
-
-          // Gemini uses "model" for the assistant role. The final user turn is sent
-          // via sendMessage; everything before it becomes the chat history.
-          const history = body.messages.slice(0, -1).map((m) => ({
-            role: m.role === "assistant" ? "model" : "user",
-            parts: [{ text: m.content }],
-          }));
-
-          const chat = model.startChat({
-            history,
-            generationConfig: { maxOutputTokens: 1024 },
-          });
-
-          const result = await chat.sendMessage(lastMessage.content);
-          const text = result.response.text() || "";
-
+          const text = await callGemini(systemContent, body.messages);
           return jsonResponse({ reply: text });
+
         } catch (err: any) {
-          console.error("Chat API error:", err?.message || err);
+          console.error("Chat API error:", err?.message ?? err);
           return errorResponse("Failed to generate response", 500);
         }
       },
