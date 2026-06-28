@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import Anthropic from "@anthropic-ai/sdk";
+import { DEFAULT_SYSTEM_PROMPT } from "@/server/chatbot.functions";
 import { db } from "../../db/index.js";
 import { siteSettings, players } from "../../db/schema.js";
 import { eq } from "drizzle-orm";
 import { withRetry, jsonResponse, errorResponse } from "@/lib/db-retry";
 
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful assistant for the Rebels Volleyball team. You can answer questions about our players, their positions, skill levels, and the team in general. Be friendly, concise, and enthusiastic about volleyball!`;
 
 export const Route = createFileRoute("/api/chat")({
   server: {
