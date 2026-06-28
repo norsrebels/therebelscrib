@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.97.1",
+    "@google/generative-ai": "^0.24.1",
     "@netlify/blobs": "^10.7.4",
     "@netlify/database": "^1.0.0",
     "@netlify/identity": "^1.0.0",
