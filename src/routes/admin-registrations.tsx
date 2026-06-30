@@ -29,10 +29,18 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   cancelled:  { label: 'Cancelled',  color: 'text-red-500 bg-red-500/10',      icon: Ban },
 }
 
-function formatDateTime(d: string | null): string {
+function formatDateTime(d: string | Date | null | undefined): string {
   if (!d) return 'TBA'
-  const iso = d.includes('T') ? d : d + 'T00:00:00'
-  const date = new Date(iso)
+  // r.date can arrive as a Date object (raw driver), an ISO string (after JSON
+  // transport), or a bare 'YYYY-MM-DD' string — handle all three without throwing.
+  let date: Date
+  if (d instanceof Date) {
+    date = d
+  } else if (typeof d === 'string') {
+    date = new Date(d.includes('T') ? d : d + 'T00:00:00')
+  } else {
+    return 'TBA'
+  }
   if (isNaN(date.getTime())) return 'TBA'
   const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0
   const opts: Intl.DateTimeFormatOptions = hasTime
