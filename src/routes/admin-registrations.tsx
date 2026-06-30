@@ -396,6 +396,7 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
   const [capacity, setCapacity] = useState(schedule?.capacity?.toString() ?? '')
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>(schedule?.customFields ?? [])
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   const addField = () => setCustomFields([...customFields, {
     id: 'cf_' + Math.random().toString(36).slice(2, 8), name: '', type: 'text', options: [], required: false, defaultValue: '',
@@ -407,6 +408,7 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
 
   const handleSave = async () => {
     setSaving(true)
+    setSaveError('')
     const payload = {
       name, sport, date: combineDateAndTime(date, startTime), endDate: combineDateAndTime(endDate, endTime),
       venue, description,
@@ -420,6 +422,8 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
         await createRegistrationSchedule({ data: payload })
       }
       onSaved()
+    } catch (err: any) {
+      setSaveError(err?.message || 'Failed to save schedule. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -520,6 +524,10 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
               ))}
             </div>
           </div>
+
+          {saveError && (
+            <p className="text-sm text-red-500 bg-red-500/10 rounded-lg px-3 py-2">{saveError}</p>
+          )}
 
           <button onClick={handleSave} disabled={saving || !name.trim()}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-sm font-bold transition-colors disabled:opacity-50">
