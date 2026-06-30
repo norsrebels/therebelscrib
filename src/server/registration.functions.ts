@@ -97,7 +97,7 @@ function mapRegistration(r: any): Registration {
 export const getActiveRegistrationSchedules = createServerFn({ method: 'GET' }).handler(async () => {
   return withRetry(async () => {
     const rows = await db.execute(sql`
-      SELECT s.*, COALESCE(SUM(CASE WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
+      SELECT s.*, COALESCE(SUM(CASE WHEN r.id IS NULL THEN 0 WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
       FROM registration_schedules s
       LEFT JOIN registrations r ON r.schedule_id = s.id AND r.status != 'cancelled'
       WHERE s.status = 'active'
@@ -114,7 +114,7 @@ export const getAllRegistrationSchedules = createServerFn({ method: 'GET' }).han
   if (!admin) throw new Error('Admin access required')
   return withRetry(async () => {
     const rows = await db.execute(sql`
-      SELECT s.*, COALESCE(SUM(CASE WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
+      SELECT s.*, COALESCE(SUM(CASE WHEN r.id IS NULL THEN 0 WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
       FROM registration_schedules s
       LEFT JOIN registrations r ON r.schedule_id = s.id AND r.status != 'cancelled'
       GROUP BY s.id
@@ -199,7 +199,7 @@ export const submitRegistration = createServerFn({ method: 'POST' })
     return withRetry(async () => {
       // Check the schedule is still active and not over capacity before accepting.
       const schedRows = await db.execute(sql`
-        SELECT s.*, COALESCE(SUM(CASE WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
+        SELECT s.*, COALESCE(SUM(CASE WHEN r.id IS NULL THEN 0 WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
         FROM registration_schedules s
         LEFT JOIN registrations r ON r.schedule_id = s.id AND r.status != 'cancelled'
         WHERE s.id = ${data.scheduleId}
