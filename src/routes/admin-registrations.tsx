@@ -267,7 +267,7 @@ function AdminRegistrationsPage() {
         </div>
       </div>
 
-      {/* Registrations list */}
+      {/* The Rebels Registrations list */}
       {loading ? (
         <p className="text-center text-sm text-[rgb(var(--muted-fg))] py-12">Loading…</p>
       ) : registrations.length === 0 ? (
