@@ -1,17 +1,31 @@
 // src/components/ScheduleCardGenerator.tsx
 // Generates a branded 1080x1350 (4:5) JPG schedule card for sharing/inviting.
 // Pulls date/venue/time from saved tournament settings but stays editable before
-// generating. Three template styles, plus an optional photo: source (upload or
-// gallery), treatment (photo or accent-colored duotone silhouette), and placement
-// (header band / full background / side panel) — all independently selectable.
+// generating. Layout flexibility: 3 templates, optional photo (upload or gallery,
+// full/silhouette treatment, header/background/side placement), plus styling:
+// accent color override, font family, text alignment, text color, logo toggle,
+// custom footer text, and background style (solid/gradient/pattern).
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Download, Sparkles, Image as ImageIcon, Upload, Images, Trash2 } from 'lucide-react'
+import { X, Download, Sparkles, Image as ImageIcon, Upload, Images, Trash2, Palette } from 'lucide-react'
 import { getGalleryImages, type GalleryImage } from '@/server/gallery.functions'
+import { FONT_OPTIONS, loadFont, fontFamily, type FontChoice } from '@/lib/schedule-card-fonts'
 
 type Template = 'bold' | 'minimal' | 'energetic'
 type ImageTreatment = 'photo' | 'silhouette'
 type ImagePlacement = 'header' | 'background' | 'side'
+type Alignment = 'left' | 'center' | 'right'
+type BackgroundStyle = 'solid' | 'gradient' | 'pattern'
+
+interface CardStyle {
+  accentRGB: string       // "r, g, b"
+  font: FontChoice
+  align: Alignment
+  textColor: string       // hex or 'auto' to use template default
+  showLogo: boolean
+  footerText: string
+  background: BackgroundStyle
+}
 
 const QUOTES = [
   "Leave it all on the court.",
@@ -36,6 +50,14 @@ function getLiveAccentRGB(): string {
   if (typeof window === 'undefined') return '0, 113, 227'
   const v = getComputedStyle(document.documentElement).getPropertyValue('--accent-500').trim()
   return v || '0, 113, 227'
+}
+
+function hexToRGBString(hex: string): string {
+  const m = hex.replace('#', '')
+  const r = parseInt(m.substring(0, 2), 16)
+  const g = parseInt(m.substring(2, 4), 16)
+  const b = parseInt(m.substring(4, 6), 16)
+  return `${r}, ${g}, ${b}`
 }
 
 function formatDateDisplay(iso: string): { day: string; month: string; weekday: string } {
@@ -122,6 +144,47 @@ function buildSilhouetteCanvas(img: HTMLImageElement, accentRGB: string): HTMLCa
   return off
 }
 
+/** Maps our Alignment type to canvas textAlign + an x-anchor within a content box. */
+function alignAnchor(align: Alignment, left: number, width: number): { x: number; canvasAlign: CanvasTextAlign } {
+  if (align === 'left') return { x: left + 60, canvasAlign: 'left' }
+  if (align === 'right') return { x: left + width - 60, canvasAlign: 'right' }
+  return { x: left + width / 2, canvasAlign: 'center' }
+}
+
+/** Fills the base card background per the chosen style + light/dark template mood. */
+function paintBackground(ctx: CanvasRenderingContext2D, w: number, h: number, isDark: boolean, accent: string, bg: BackgroundStyle) {
+  if (bg === 'solid') {
+    ctx.fillStyle = isDark ? '#0e0e14' : '#fafafa'
+    ctx.fillRect(0, 0, w, h)
+  } else if (bg === 'gradient') {
+    const g = ctx.createLinearGradient(0, 0, w, h)
+    if (isDark) {
+      g.addColorStop(0, '#0a0a0f')
+      g.addColorStop(1, '#1a1a24')
+    } else {
+      g.addColorStop(0, '#ffffff')
+      g.addColorStop(1, '#f0f0f0')
+    }
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, w, h)
+  } else {
+    // pattern: base fill + faint diagonal accent stripes
+    ctx.fillStyle = isDark ? '#0e0e14' : '#fafafa'
+    ctx.fillRect(0, 0, w, h)
+    ctx.save()
+    ctx.globalAlpha = 0.05
+    ctx.strokeStyle = accent
+    ctx.lineWidth = 18
+    for (let i = -h; i < w + h; i += 70) {
+      ctx.beginPath()
+      ctx.moveTo(i, 0)
+      ctx.lineTo(i + h, h)
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+}
+
 const W = 1080
 const H = 1350
 
@@ -129,7 +192,7 @@ async function drawCard(
   canvas: HTMLCanvasElement,
   template: Template,
   data: { scheduleName: string; venue: string; date: string; startTime: string; endTime: string; quote: string },
-  accentRGB: string,
+  style: CardStyle,
   logo: HTMLImageElement | null,
   photo: HTMLImageElement | null,
   treatment: ImageTreatment,
@@ -139,23 +202,19 @@ async function drawCard(
   if (!ctx) return
   canvas.width = W
   canvas.height = H
-  const accent = `rgb(${accentRGB})`
+  const accent = `rgb(${style.accentRGB})`
+  const fam = fontFamily(style.font)
   const { day, month, weekday } = formatDateDisplay(data.date)
   const timeRange = `${formatTimeDisplay(data.startTime)} – ${formatTimeDisplay(data.endTime)}`
 
   const photoSource: HTMLImageElement | HTMLCanvasElement | null =
-    photo ? (treatment === 'silhouette' ? buildSilhouetteCanvas(photo, accentRGB) : photo) : null
-
-  const darkGrad = () => {
-    const g = ctx.createLinearGradient(0, 0, W, H)
-    g.addColorStop(0, '#0a0a0f')
-    g.addColorStop(1, '#1a1a24')
-    return g
-  }
+    photo ? (treatment === 'silhouette' ? buildSilhouetteCanvas(photo, style.accentRGB) : photo) : null
 
   const isDark = template !== 'minimal'
-  ctx.fillStyle = template === 'minimal' ? '#fafafa' : darkGrad()
-  ctx.fillRect(0, 0, W, H)
+  const primaryText = style.textColor !== 'auto' ? style.textColor : (isDark ? '#ffffff' : '#111111')
+  const mutedText = style.textColor !== 'auto' ? style.textColor : (isDark ? 'rgba(255,255,255,0.75)' : '#555555')
+
+  paintBackground(ctx, W, H, isDark, accent, style.background)
 
   let contentTop = 0
   let contentLeft = 0
@@ -199,7 +258,7 @@ async function drawCard(
       drawCover(ctx, photoSource as HTMLImageElement, 0, 0, W, bandH)
       const fade = ctx.createLinearGradient(0, bandH - 140, 0, bandH)
       fade.addColorStop(0, 'rgba(0,0,0,0)')
-      fade.addColorStop(1, isDark ? '#0a0a0f' : '#fafafa')
+      fade.addColorStop(1, isDark ? '#0e0e14' : '#fafafa')
       ctx.fillStyle = fade
       ctx.fillRect(0, bandH - 140, W, 140)
     }
@@ -207,9 +266,8 @@ async function drawCard(
     contentTop = bandH - 60
   }
 
-  let sideW = 0
   if (photoSource && placement === 'side') {
-    sideW = W * 0.34
+    const sideW = W * 0.34
     ctx.save()
     ctx.beginPath()
     ctx.rect(0, 0, sideW, H)
@@ -233,8 +291,14 @@ async function drawCard(
     contentWidth = W - sideW
   }
 
+  const { x: anchorX, canvasAlign } = alignAnchor(style.align, contentLeft, contentWidth)
+  ctx.textAlign = canvasAlign
+  // For quotes/footer we always want them readable across the full content width,
+  // so compute a center-x separately regardless of the chosen text alignment.
   const cx = contentLeft + contentWidth / 2
+  const wrapW = contentWidth - 140
 
+  // ════════════════════════════════════ BOLD ════════════════════════════════
   if (template === 'bold') {
     if (placement !== 'background' || !photoSource) {
       ctx.save()
@@ -250,78 +314,79 @@ async function drawCard(
       ctx.restore()
     }
 
-    if (logo && placement !== 'header') ctx.drawImage(logo, cx - 50, contentTop + 50, 100, 100)
+    if (style.showLogo && logo && placement !== 'header') ctx.drawImage(logo, cx - 50, contentTop + 50, 100, 100)
+
+    ctx.fillStyle = primaryText
+    ctx.font = `700 34px ${fam}`
+    ctx.fillText(data.scheduleName.toUpperCase(), anchorX, contentTop + (placement === 'header' ? 70 : 200))
+
+    ctx.textAlign = canvasAlign
+    ctx.font = `900 ${placement === 'side' ? 150 : 200}px ${fam}`
+    ctx.fillStyle = primaryText
+    ctx.fillText(day, anchorX, contentTop + 460)
+    ctx.font = `700 46px ${fam}`
+    ctx.fillStyle = accent
+    ctx.fillText(month, anchorX, contentTop + 510)
+
+    ctx.font = `700 34px ${fam}`
+    ctx.fillStyle = primaryText
+    ctx.fillText(`${weekday.toUpperCase()} • ${timeRange}`, anchorX, contentTop + 590)
+
+    ctx.font = `600 32px ${fam}`
+    ctx.fillStyle = primaryText
+    wrapText(ctx, '📍 ' + data.venue, wrapW).forEach((l, i) => ctx.fillText(l, anchorX, contentTop + 650 + i * 40))
 
     ctx.textAlign = 'center'
-    ctx.fillStyle = '#ffffff'
-    ctx.font = '700 34px Arial'
-    ctx.fillText(data.scheduleName.toUpperCase(), cx, contentTop + (placement === 'header' ? 70 : 200))
+    ctx.font = `italic 400 27px Georgia`
+    ctx.fillStyle = mutedText
+    wrapText(ctx, `"${data.quote}"`, wrapW).forEach((l, i) => ctx.fillText(l, cx, contentTop + 780 + i * 38))
 
-    ctx.font = `900 ${placement === 'side' ? 150 : 200}px Arial`
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(day, cx, contentTop + 460)
-    ctx.font = '700 46px Arial'
+    ctx.font = `700 26px ${fam}`
     ctx.fillStyle = accent
-    ctx.fillText(month, cx, contentTop + 510)
+    ctx.fillText(style.footerText.toUpperCase(), cx, H - 60)
 
-    ctx.font = '700 34px Arial'
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(`${weekday.toUpperCase()} • ${timeRange}`, cx, contentTop + 590)
-
-    ctx.font = '600 32px Arial'
-    ctx.fillStyle = '#ffffff'
-    const venueLines = wrapText(ctx, '📍 ' + data.venue, contentWidth - 100)
-    venueLines.forEach((l, i) => ctx.fillText(l, cx, contentTop + 650 + i * 40))
-
-    ctx.font = 'italic 400 27px Georgia'
-    ctx.fillStyle = 'rgba(255,255,255,0.75)'
-    const lines = wrapText(ctx, `"${data.quote}"`, contentWidth - 120)
-    lines.forEach((l, i) => ctx.fillText(l, cx, contentTop + 780 + i * 38))
-
-    ctx.font = '700 26px Arial'
-    ctx.fillStyle = accent
-    ctx.fillText('THE REBELS VOLLEYBALL', cx, H - 60)
-
+  // ═══════════════════════════════════ MINIMAL ══════════════════════════════
   } else if (template === 'minimal') {
     ctx.strokeStyle = accent
     ctx.lineWidth = 6
     ctx.strokeRect(40, 40, W - 80, H - 80)
 
-    if (logo && placement !== 'header') ctx.drawImage(logo, cx - 45, contentTop + 80, 90, 90)
+    if (style.showLogo && logo && placement !== 'header') ctx.drawImage(logo, cx - 45, contentTop + 80, 90, 90)
+
+    ctx.textAlign = canvasAlign
+    ctx.fillStyle = primaryText
+    ctx.font = `600 30px ${fam}`
+    ctx.fillText(data.scheduleName, anchorX, contentTop + (placement === 'header' ? 60 : 230))
+
+    ctx.fillStyle = accent
+    const ruleX = style.align === 'left' ? anchorX : style.align === 'right' ? anchorX - 110 : cx - 55
+    ctx.fillRect(ruleX, contentTop + 260, 110, 4)
+
+    ctx.font = `300 ${placement === 'side' ? 100 : 120}px ${fam}`
+    ctx.fillStyle = primaryText
+    ctx.fillText(day, anchorX, contentTop + 420)
+    ctx.font = `600 30px ${fam}`
+    ctx.fillStyle = accent
+    ctx.fillText(`${month} • ${weekday.toUpperCase()}`, anchorX, contentTop + 465)
+
+    ctx.font = `500 36px ${fam}`
+    ctx.fillStyle = primaryText
+    ctx.fillText(timeRange, anchorX, contentTop + 560)
+
+    ctx.font = `400 28px ${fam}`
+    ctx.fillStyle = mutedText
+    wrapText(ctx, data.venue, wrapW).forEach((l, i) => ctx.fillText(l, anchorX, contentTop + 610 + i * 36))
 
     ctx.textAlign = 'center'
-    ctx.fillStyle = '#111111'
-    ctx.font = '600 30px Arial'
-    ctx.fillText(data.scheduleName, cx, contentTop + (placement === 'header' ? 60 : 230))
+    ctx.font = `italic 400 26px Georgia`
+    ctx.fillStyle = mutedText
+    wrapText(ctx, `"${data.quote}"`, wrapW).forEach((l, i) => ctx.fillText(l, cx, contentTop + 730 + i * 36))
 
+    ctx.font = `700 22px ${fam}`
     ctx.fillStyle = accent
-    ctx.fillRect(cx - 55, contentTop + 260, 110, 4)
+    ctx.fillText(style.footerText.toUpperCase(), cx, H - 90)
 
-    ctx.font = `300 ${placement === 'side' ? 100 : 120}px Arial`
-    ctx.fillStyle = '#111111'
-    ctx.fillText(day, cx, contentTop + 420)
-    ctx.font = '600 30px Arial'
-    ctx.fillStyle = accent
-    ctx.fillText(`${month} • ${weekday.toUpperCase()}`, cx, contentTop + 465)
-
-    ctx.font = '500 36px Arial'
-    ctx.fillStyle = '#111111'
-    ctx.fillText(timeRange, cx, contentTop + 560)
-
-    ctx.font = '400 28px Arial'
-    ctx.fillStyle = '#555555'
-    const venueLines = wrapText(ctx, data.venue, contentWidth - 100)
-    venueLines.forEach((l, i) => ctx.fillText(l, cx, contentTop + 610 + i * 36))
-
-    ctx.font = 'italic 400 26px Georgia'
-    ctx.fillStyle = '#888888'
-    const lines = wrapText(ctx, `"${data.quote}"`, contentWidth - 160)
-    lines.forEach((l, i) => ctx.fillText(l, cx, contentTop + 730 + i * 36))
-
-    ctx.font = '700 22px Arial'
-    ctx.fillStyle = accent
-    ctx.fillText('THE REBELS VOLLEYBALL', cx, H - 90)
-
+  // ══════════════════════════════════ ENERGETIC ═════════════════════════════
   } else {
     if (!photoSource || placement !== 'background') {
       ctx.save()
@@ -334,40 +399,42 @@ async function drawCard(
     }
 
     const padLeft = contentLeft + 70
-    if (logo && placement !== 'header' && placement !== 'side') ctx.drawImage(logo, padLeft, contentTop + 50, 85, 85)
+    const leftAnchor = style.align === 'right' ? contentLeft + contentWidth - 70 : padLeft
+    const leftCanvasAlign: CanvasTextAlign = style.align === 'right' ? 'right' : style.align === 'center' ? 'center' : 'left'
+    const effAnchor = style.align === 'center' ? cx : leftAnchor
 
-    ctx.textAlign = 'left'
-    ctx.fillStyle = '#ffffff'
-    ctx.font = '800 28px Arial'
-    ctx.fillText(data.scheduleName.toUpperCase(), placement === 'side' || placement === 'header' ? padLeft : padLeft + 100, contentTop + (placement === 'header' ? 50 : 105))
+    if (style.showLogo && logo && placement !== 'header' && placement !== 'side') ctx.drawImage(logo, padLeft, contentTop + 50, 85, 85)
 
-    ctx.font = `900 ${placement === 'side' ? 130 : 160}px Arial`
+    ctx.textAlign = leftCanvasAlign
+    ctx.fillStyle = primaryText
+    ctx.font = `800 28px ${fam}`
+    ctx.fillText(data.scheduleName.toUpperCase(), effAnchor, contentTop + (placement === 'header' ? 50 : 105))
+
+    ctx.font = `900 ${placement === 'side' ? 130 : 160}px ${fam}`
     ctx.fillStyle = accent
-    ctx.fillText(day, padLeft, contentTop + 430)
-    ctx.font = '800 42px Arial'
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(month, padLeft, contentTop + 485)
-    ctx.font = '600 28px Arial'
-    ctx.fillStyle = '#cccccc'
-    ctx.fillText(weekday.toUpperCase(), padLeft, contentTop + 525)
+    ctx.fillText(day, effAnchor, contentTop + 430)
+    ctx.font = `800 42px ${fam}`
+    ctx.fillStyle = primaryText
+    ctx.fillText(month, effAnchor, contentTop + 485)
+    ctx.font = `600 28px ${fam}`
+    ctx.fillStyle = mutedText
+    ctx.fillText(weekday.toUpperCase(), effAnchor, contentTop + 525)
 
-    ctx.font = '700 40px Arial'
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText('⏱ ' + timeRange, padLeft, contentTop + 610)
-    ctx.font = '600 30px Arial'
+    ctx.font = `700 40px ${fam}`
+    ctx.fillStyle = primaryText
+    ctx.fillText('⏱ ' + timeRange, effAnchor, contentTop + 610)
+    ctx.font = `600 30px ${fam}`
     ctx.fillStyle = accent
-    const venueLines = wrapText(ctx, '📍 ' + data.venue, contentWidth - 140)
-    venueLines.forEach((l, i) => ctx.fillText(l, padLeft, contentTop + 660 + i * 36))
+    wrapText(ctx, '📍 ' + data.venue, wrapW).forEach((l, i) => ctx.fillText(l, effAnchor, contentTop + 660 + i * 36))
 
     ctx.textAlign = 'center'
-    ctx.font = 'italic 600 27px Georgia'
-    ctx.fillStyle = 'rgba(255,255,255,0.85)'
-    const lines = wrapText(ctx, `"${data.quote}"`, contentWidth - 140)
-    lines.forEach((l, i) => ctx.fillText(l, cx, H - 220 + i * 38))
+    ctx.font = `italic 600 27px Georgia`
+    ctx.fillStyle = mutedText
+    wrapText(ctx, `"${data.quote}"`, wrapW).forEach((l, i) => ctx.fillText(l, cx, H - 220 + i * 38))
 
-    ctx.font = '800 24px Arial'
+    ctx.font = `800 24px ${fam}`
     ctx.fillStyle = accent
-    ctx.fillText('THE REBELS VOLLEYBALL CLUB', cx, H - 60)
+    ctx.fillText(style.footerText.toUpperCase(), cx, H - 60)
   }
 }
 
@@ -394,12 +461,25 @@ export function ScheduleCardGenerator({
   const [quote, setQuote] = useState(randomQuote())
   const [generating, setGenerating] = useState(false)
 
+  // Image
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [treatment, setTreatment] = useState<ImageTreatment>('photo')
   const [placement, setPlacement] = useState<ImagePlacement>('header')
   const [showGalleryPicker, setShowGalleryPicker] = useState(false)
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([])
   const [loadingGallery, setLoadingGallery] = useState(false)
+
+  // Style
+  const [useCustomAccent, setUseCustomAccent] = useState(false)
+  const [customAccentHex, setCustomAccentHex] = useState('#0071e3')
+  const [font, setFont] = useState<FontChoice>('arial')
+  const [fontLoading, setFontLoading] = useState(false)
+  const [align, setAlign] = useState<Alignment>('center')
+  const [textColorMode, setTextColorMode] = useState<'auto' | 'custom'>('auto')
+  const [customTextHex, setCustomTextHex] = useState('#ffffff')
+  const [showLogo, setShowLogo] = useState(true)
+  const [footerText, setFooterText] = useState('The Rebels Volleyball')
+  const [background, setBackground] = useState<BackgroundStyle>('gradient')
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const logoRef = useRef<HTMLImageElement | null>(null)
@@ -417,19 +497,37 @@ export function ScheduleCardGenerator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photoUrl])
 
+  useEffect(() => {
+    let cancelled = false
+    setFontLoading(true)
+    loadFont(font).then(() => { if (!cancelled) { setFontLoading(false); render() } })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [font])
+
   const render = useCallback(() => {
     if (!canvasRef.current) return
+    const style: CardStyle = {
+      accentRGB: useCustomAccent ? hexToRGBString(customAccentHex) : getLiveAccentRGB(),
+      font,
+      align,
+      textColor: textColorMode === 'custom' ? customTextHex : 'auto',
+      showLogo,
+      footerText: footerText || 'The Rebels Volleyball',
+      background,
+    }
     drawCard(
       canvasRef.current,
       template,
       { scheduleName: scheduleName || 'Tournament', venue, date, startTime, endTime, quote },
-      getLiveAccentRGB(),
+      style,
       logoRef.current,
       photoRef.current,
       treatment,
       placement
     )
-  }, [template, venue, date, startTime, endTime, quote, scheduleName, treatment, placement])
+  }, [template, venue, date, startTime, endTime, quote, scheduleName, treatment, placement,
+      useCustomAccent, customAccentHex, font, align, textColorMode, customTextHex, showLogo, footerText, background])
 
   useEffect(() => { render() }, [render])
 
@@ -470,10 +568,20 @@ export function ScheduleCardGenerator({
     }, 'image/jpeg', 0.92)
   }
 
+  const SegBtn = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) => (
+    <button onClick={onClick}
+      className={`py-2 rounded-xl text-xs font-bold capitalize border transition-colors ${
+        active ? 'bg-blue-600 text-white border-blue-600'
+          : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:border-blue-500'
+      }`}>
+      {children}
+    </button>
+  )
+
   return (
     <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-y-auto"
+        className="bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-[rgb(var(--border-soft))] sticky top-0 bg-[rgb(var(--surface))] z-10">
@@ -482,27 +590,26 @@ export function ScheduleCardGenerator({
         </div>
 
         <div className="p-5 grid md:grid-cols-2 gap-6">
-          <div className="flex flex-col items-center">
+          {/* Preview */}
+          <div className="flex flex-col items-center md:sticky md:top-20 self-start">
             <canvas ref={canvasRef} className="w-full max-w-[300px] rounded-xl shadow-lg border border-[rgb(var(--border-soft))]" />
             <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-2">1080 × 1350 — Instagram & Facebook ready</p>
+            {fontLoading && <p className="text-[11px] text-blue-500 mt-1">Loading font…</p>}
           </div>
 
-          <div className="space-y-4">
+          {/* Controls */}
+          <div className="space-y-5">
+            {/* Template */}
             <div>
               <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Template</label>
               <div className="grid grid-cols-3 gap-2">
                 {(['bold', 'minimal', 'energetic'] as Template[]).map((t) => (
-                  <button key={t} onClick={() => setTemplate(t)}
-                    className={`py-2 rounded-xl text-xs font-bold capitalize border transition-colors ${
-                      template === t ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:border-blue-500'
-                    }`}>
-                    {t}
-                  </button>
+                  <SegBtn key={t} active={template === t} onClick={() => setTemplate(t)}>{t}</SegBtn>
                 ))}
               </div>
             </div>
 
+            {/* Photo */}
             <div>
               <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Photo (optional)</label>
               {photoUrl ? (
@@ -531,68 +638,144 @@ export function ScheduleCardGenerator({
                 <div>
                   <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Treatment</label>
                   <div className="grid grid-cols-2 gap-2">
-                    {(['photo', 'silhouette'] as ImageTreatment[]).map((t) => (
-                      <button key={t} onClick={() => setTreatment(t)}
-                        className={`py-2 rounded-xl text-xs font-bold capitalize border transition-colors ${
-                          treatment === t ? 'bg-blue-600 text-white border-blue-600'
-                            : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:border-blue-500'
-                        }`}>
-                        {t === 'photo' ? 'Full Photo' : 'Silhouette'}
-                      </button>
-                    ))}
+                    <SegBtn active={treatment === 'photo'} onClick={() => setTreatment('photo')}>Full Photo</SegBtn>
+                    <SegBtn active={treatment === 'silhouette'} onClick={() => setTreatment('silhouette')}>Silhouette</SegBtn>
                   </div>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Placement</label>
                   <div className="grid grid-cols-3 gap-2">
                     {(['header', 'background', 'side'] as ImagePlacement[]).map((p) => (
-                      <button key={p} onClick={() => setPlacement(p)}
-                        className={`py-2 rounded-xl text-xs font-bold capitalize border transition-colors ${
-                          placement === p ? 'bg-blue-600 text-white border-blue-600'
-                            : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:border-blue-500'
-                        }`}>
-                        {p}
-                      </button>
+                      <SegBtn key={p} active={placement === p} onClick={() => setPlacement(p)}>{p}</SegBtn>
                     ))}
                   </div>
                 </div>
               </>
             )}
 
-            <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Venue</label>
-              <input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="e.g. Rebels Sports Complex"
-                className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
-            </div>
+            <div className="border-t border-[rgb(var(--border-soft))] pt-4">
+              <p className="text-xs font-bold text-[rgb(var(--fg))] mb-3 flex items-center gap-1.5"><Palette size={13} /> Design Flexibility</p>
 
-            <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Start Time</label>
-                <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)}
-                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+              {/* Accent color */}
+              <div className="mb-4">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Accent Color</label>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setUseCustomAccent(false)}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${!useCustomAccent ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>
+                    Site Theme
+                  </button>
+                  <button onClick={() => setUseCustomAccent(true)}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${useCustomAccent ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>
+                    Custom
+                  </button>
+                  {useCustomAccent && (
+                    <input type="color" value={customAccentHex} onChange={(e) => setCustomAccentHex(e.target.value)}
+                      className="w-10 h-9 rounded-lg border border-[rgb(var(--border-soft))] cursor-pointer" />
+                  )}
+                </div>
               </div>
-              <div>
-                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">End Time</label>
-                <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)}
-                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
-              </div>
-            </div>
 
-            <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1 flex items-center justify-between">
-                <span>Quote</span>
-                <button onClick={() => setQuote(randomQuote())} className="text-blue-500 flex items-center gap-1 text-[11px] font-semibold hover:underline">
-                  <Sparkles size={11} /> Shuffle
+              {/* Font */}
+              <div className="mb-4">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Font Style</label>
+                <select value={font} onChange={(e) => setFont(e.target.value as FontChoice)}
+                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500">
+                  {FONT_OPTIONS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
+              </div>
+
+              {/* Alignment */}
+              <div className="mb-4">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Text Alignment</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['left', 'center', 'right'] as Alignment[]).map((a) => (
+                    <SegBtn key={a} active={align === a} onClick={() => setAlign(a)}>{a}</SegBtn>
+                  ))}
+                </div>
+              </div>
+
+              {/* Text color */}
+              <div className="mb-4">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Text Color</label>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setTextColorMode('auto')}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${textColorMode === 'auto' ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>
+                    Auto (Template Default)
+                  </button>
+                  <button onClick={() => setTextColorMode('custom')}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${textColorMode === 'custom' ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>
+                    Custom
+                  </button>
+                  {textColorMode === 'custom' && (
+                    <input type="color" value={customTextHex} onChange={(e) => setCustomTextHex(e.target.value)}
+                      className="w-10 h-9 rounded-lg border border-[rgb(var(--border-soft))] cursor-pointer" />
+                  )}
+                </div>
+              </div>
+
+              {/* Background style */}
+              <div className="mb-4">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Background Style</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['solid', 'gradient', 'pattern'] as BackgroundStyle[]).map((b) => (
+                    <SegBtn key={b} active={background === b} onClick={() => setBackground(b)}>{b}</SegBtn>
+                  ))}
+                </div>
+              </div>
+
+              {/* Logo toggle */}
+              <div className="mb-4 flex items-center justify-between">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Show Club Logo</label>
+                <button onClick={() => setShowLogo(!showLogo)}
+                  className={`w-11 h-6 rounded-full transition-colors relative ${showLogo ? 'bg-blue-600' : 'bg-[rgb(var(--border-soft))]'}`}>
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${showLogo ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
-              </label>
-              <textarea value={quote} onChange={(e) => setQuote(e.target.value)} rows={2}
-                className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 resize-none focus:outline-none focus:border-blue-500" />
+              </div>
+
+              {/* Footer text */}
+              <div>
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Footer Text</label>
+                <input value={footerText} onChange={(e) => setFooterText(e.target.value)} placeholder="The Rebels Volleyball"
+                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+              </div>
+            </div>
+
+            <div className="border-t border-[rgb(var(--border-soft))] pt-4 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Venue</label>
+                <input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="e.g. Rebels Sports Complex"
+                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Date</label>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Start Time</label>
+                  <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)}
+                    className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">End Time</label>
+                  <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)}
+                    className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1 flex items-center justify-between">
+                  <span>Quote</span>
+                  <button onClick={() => setQuote(randomQuote())} className="text-blue-500 flex items-center gap-1 text-[11px] font-semibold hover:underline">
+                    <Sparkles size={11} /> Shuffle
+                  </button>
+                </label>
+                <textarea value={quote} onChange={(e) => setQuote(e.target.value)} rows={2}
+                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 resize-none focus:outline-none focus:border-blue-500" />
+              </div>
             </div>
 
             <button onClick={handleDownload} disabled={generating}
