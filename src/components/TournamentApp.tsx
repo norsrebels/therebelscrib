@@ -52,7 +52,7 @@ import {
   Upload,
   BarChart2,
 } from "lucide-react";
-import { Save, Check, AlertTriangle, Copy, Globe, Radio, ChevronRight, Share2, Trophy } from "lucide-react";
+import { Save, Check, AlertTriangle, Copy, Globe, Radio, ChevronRight, Share2, Trophy, Image as ImageIcon } from "lucide-react";
 import { uploadPlayerImage } from "../server/player.functions";
 import { VISStatsTab } from "./VISStatsTab";
 
@@ -2390,6 +2390,7 @@ function SettingsTab({
 }) {
   const [localSettings, setLocalSettings] = useState(state.settings);
   const [isSaved, setIsSaved] = useState(false);
+  const [showCardGenerator, setShowCardGenerator] = useState(false);
 
   // Update local state if parent state changes (e.g. on initial load or remote sync)
   useEffect(() => {
@@ -2615,11 +2616,30 @@ function SettingsTab({
           >
             <Download size={16} /> Download Backup (JSON)
           </button>
+          <button
+            onClick={() => setShowCardGenerator(true)}
+            className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-sm font-bold transition-colors"
+          >
+            <ImageIcon size={16} /> Generate Schedule Card (JPG)
+          </button>
         </div>
       </div>
+
+      {showCardGenerator && (
+        <ScheduleCardGenerator
+          scheduleName={state.settings.scheduleName}
+          defaultVenue={state.settings.venue}
+          defaultDate={state.settings.date}
+          defaultStartTime={state.settings.startTime}
+          defaultEndTime={state.settings.endTime}
+          onClose={() => setShowCardGenerator(false)}
+        />
+      )}
     </div>
   );
 }
+
+import { ScheduleCardGenerator } from "@/components/ScheduleCardGenerator";
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
