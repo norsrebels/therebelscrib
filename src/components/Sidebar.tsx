@@ -23,6 +23,7 @@ import {
   MessageSquare,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-client'
 import { logout } from '@netlify/identity'
@@ -41,6 +42,7 @@ const NAV_ITEMS = [
   { path: '/social', label: 'Social Media', icon: Share2 },
   { path: '/communities', label: 'Communities', icon: UsersRound },
   { path: '/chat', label: 'Chat', icon: MessageSquare },
+  { path: '/registration', label: 'Register', icon: ClipboardList },
   { path: '/leaderboard', label: 'Player Statistics', icon: BarChart2 },
 ]
 
