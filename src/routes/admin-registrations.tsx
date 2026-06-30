@@ -279,12 +279,12 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
     setSaving(true)
     const payload = {
       name, sport, date: date || null, endDate: endDate || null, venue, description,
-      capacity: capacity ? parseInt(capacity, 10) : null, customFields,
+      capacity: capacity ? parseInt(capacity, 10) : null, status, customFields,
       linkedTournamentExternalId: schedule?.linkedTournamentExternalId ?? null,
     }
     try {
       if (schedule) {
-        await updateRegistrationSchedule({ data: { ...payload, id: schedule.id, status } })
+        await updateRegistrationSchedule({ data: { ...payload, id: schedule.id } })
       } else {
         await createRegistrationSchedule({ data: payload })
       }
