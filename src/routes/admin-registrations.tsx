@@ -355,15 +355,26 @@ function AdminRegistrationsPage() {
   )
 }
 
-// Converts a Postgres timestamp string to the exact format <input type="datetime-local">
-// requires (YYYY-MM-DDTHH:mm) — the raw ISO string (with seconds/timezone) won't
-// populate the input correctly otherwise.
-function toDatetimeLocalValue(iso: string | null | undefined): string {
-  if (!iso) return ''
+// Splits a Postgres timestamp into separate <input type="date"> and
+// <input type="time"> values — easier to fill in on mobile and across browsers
+// than a single datetime-local control.
+function splitDateAndTime(iso: string | null | undefined): { date: string; time: string } {
+  if (!iso) return { date: '', time: '' }
   const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
+  if (isNaN(d.getTime())) return { date: '', time: '' }
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return {
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+  }
+}
+
+// Recombines separate date + time inputs into one timestamp string for saving.
+// time is optional — a date with no time saves as midnight, which formatDateTime
+// already treats as "date only" (no time shown) on display.
+function combineDateAndTime(date: string, time: string): string | null {
+  if (!date) return null
+  return `${date}T${time || '00:00'}`
 }
 
 function ScheduleEditorModal({ schedule, onClose, onSaved }: {
@@ -373,8 +384,12 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
 }) {
   const [name, setName] = useState(schedule?.name ?? '')
   const [sport, setSport] = useState(schedule?.sport ?? 'Volleyball')
-  const [date, setDate] = useState(toDatetimeLocalValue(schedule?.date))
-  const [endDate, setEndDate] = useState(toDatetimeLocalValue(schedule?.endDate))
+  const initialDate = splitDateAndTime(schedule?.date)
+  const initialEndDate = splitDateAndTime(schedule?.endDate)
+  const [date, setDate] = useState(initialDate.date)
+  const [startTime, setStartTime] = useState(initialDate.time)
+  const [endDate, setEndDate] = useState(initialEndDate.date)
+  const [endTime, setEndTime] = useState(initialEndDate.time)
   const [venue, setVenue] = useState(schedule?.venue ?? '')
   const [description, setDescription] = useState(schedule?.description ?? '')
   const [status, setStatus] = useState(schedule?.status ?? 'active')
@@ -393,7 +408,8 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
   const handleSave = async () => {
     setSaving(true)
     const payload = {
-      name, sport, date: date || null, endDate: endDate || null, venue, description,
+      name, sport, date: combineDateAndTime(date, startTime), endDate: combineDateAndTime(endDate, endTime),
+      venue, description,
       capacity: capacity ? parseInt(capacity, 10) : null, status, customFields,
       linkedTournamentExternalId: schedule?.linkedTournamentExternalId ?? null,
     }
@@ -427,15 +443,22 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
             <input value={sport} onChange={(e) => setSport(e.target.value)} placeholder="Volleyball"
               className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Event Date & Time</label>
-              <input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)}
+          <div>
+            <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Event Date & Time</label>
+            <div className="grid grid-cols-2 gap-3">
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+              <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)}
+                placeholder="Time (optional)"
                 className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
             </div>
-            <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">End Date & Time (optional)</label>
-              <input type="datetime-local" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+          </div>
+          <div>
+            <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">End Date & Time (optional)</label>
+            <div className="grid grid-cols-2 gap-3">
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+                className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+              <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)}
                 className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
             </div>
           </div>
