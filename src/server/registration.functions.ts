@@ -36,14 +36,20 @@ export interface RegistrationSchedule {
   registrationCount?: number
 }
 
+export interface RosterMember {
+  name: string
+  position: string  // OS | OPP | MB | S | L
+}
+
 export interface Registration {
   id: number
   scheduleId: number
   scheduleName?: string
   regType: 'individual' | 'team' | 'group'
   name: string | null
+  position: string | null   // for individual registrations
   teamName: string | null
-  roster: string[]
+  roster: RosterMember[]    // for team/group registrations, position per member
   contactNumber: string | null
   email: string | null
   customAnswers: Record<string, any>
@@ -76,6 +82,7 @@ function mapRegistration(r: any): Registration {
     scheduleName: r.schedule_name,
     regType: r.reg_type,
     name: r.name,
+    position: r.position,
     teamName: r.team_name,
     roster: r.roster ?? [],
     contactNumber: r.contact_number,
@@ -90,7 +97,7 @@ function mapRegistration(r: any): Registration {
 export const getActiveRegistrationSchedules = createServerFn({ method: 'GET' }).handler(async () => {
   return withRetry(async () => {
     const rows = await db.execute(sql`
-      SELECT s.*, COUNT(r.id)::int AS registration_count
+      SELECT s.*, COALESCE(SUM(CASE WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
       FROM registration_schedules s
       LEFT JOIN registrations r ON r.schedule_id = s.id AND r.status != 'cancelled'
       WHERE s.status = 'active'
@@ -107,7 +114,7 @@ export const getAllRegistrationSchedules = createServerFn({ method: 'GET' }).han
   if (!admin) throw new Error('Admin access required')
   return withRetry(async () => {
     const rows = await db.execute(sql`
-      SELECT s.*, COUNT(r.id)::int AS registration_count
+      SELECT s.*, COALESCE(SUM(CASE WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
       FROM registration_schedules s
       LEFT JOIN registrations r ON r.schedule_id = s.id AND r.status != 'cancelled'
       GROUP BY s.id
@@ -182,7 +189,7 @@ export const deleteRegistrationSchedule = createServerFn({ method: 'POST' })
 export const submitRegistration = createServerFn({ method: 'POST' })
   .inputValidator((data: {
     scheduleId: number; regType: 'individual' | 'team' | 'group'
-    name: string; teamName: string; roster: string[]
+    name: string; position: string; teamName: string; roster: RosterMember[]
     contactNumber: string; email: string; customAnswers: Record<string, any>
   }) => data)
   .handler(async ({ data }) => {
@@ -192,7 +199,7 @@ export const submitRegistration = createServerFn({ method: 'POST' })
     return withRetry(async () => {
       // Check the schedule is still active and not over capacity before accepting.
       const schedRows = await db.execute(sql`
-        SELECT s.*, COUNT(r.id)::int AS registration_count
+        SELECT s.*, COALESCE(SUM(CASE WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
         FROM registration_schedules s
         LEFT JOIN registrations r ON r.schedule_id = s.id AND r.status != 'cancelled'
         WHERE s.id = ${data.scheduleId}
@@ -207,9 +214,9 @@ export const submitRegistration = createServerFn({ method: 'POST' })
 
       const rows = await db.execute(sql`
         INSERT INTO registrations
-          (schedule_id, reg_type, name, team_name, roster, contact_number, email, custom_answers, status, netlify_user_id)
+          (schedule_id, reg_type, name, position, team_name, roster, contact_number, email, custom_answers, status, netlify_user_id)
         VALUES (
-          ${data.scheduleId}, ${data.regType}, ${data.name || null}, ${data.teamName || null},
+          ${data.scheduleId}, ${data.regType}, ${data.name || null}, ${data.position || null}, ${data.teamName || null},
           ${JSON.stringify(data.roster ?? [])}::jsonb, ${data.contactNumber}, ${data.email},
           ${JSON.stringify(data.customAnswers ?? {})}::jsonb, ${initialStatus}, ${identity?.userId ?? null}
         )
@@ -223,6 +230,7 @@ export const submitRegistration = createServerFn({ method: 'POST' })
 export const getRegistrations = createServerFn({ method: 'GET' })
   .inputValidator((data: {
     scheduleId?: number | null
+    scheduleName?: string | null
     dateFrom?: string | null
     dateTo?: string | null
     status?: string | null
@@ -234,11 +242,14 @@ export const getRegistrations = createServerFn({ method: 'GET' })
     return withRetry(async () => {
       const conditions = [sql`1=1`]
       if (data.scheduleId) conditions.push(sql`r.schedule_id = ${data.scheduleId}`)
+      if (data.scheduleName) conditions.push(sql`LOWER(s.name) LIKE ${`%${data.scheduleName.toLowerCase()}%`}`)
       if (data.status) conditions.push(sql`r.status = ${data.status}`)
       // Filter by the schedule's event date (not the registration submission date) —
       // this answers "who's registered for events happening in this date range."
-      if (data.dateFrom) conditions.push(sql`s.date >= ${data.dateFrom}`)
-      if (data.dateTo) conditions.push(sql`s.date <= ${data.dateTo}`)
+      if (data.dateFrom) conditions.push(sql`s.date >= ${data.dateFrom}::date`)
+      // dateTo is inclusive of the whole day — without the +1 day boundary, an event
+      // later on the dateTo day itself would be wrongly excluded (timestamp > midnight).
+      if (data.dateTo) conditions.push(sql`s.date < (${data.dateTo}::date + interval '1 day')`)
       if (data.search) {
         const term = `%${data.search.toLowerCase()}%`
         conditions.push(sql`(
