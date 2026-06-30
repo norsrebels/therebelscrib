@@ -29,9 +29,16 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   cancelled:  { label: 'Cancelled',  color: 'text-red-500 bg-red-500/10',      icon: Ban },
 }
 
-function formatDate(d: string | null): string {
+function formatDateTime(d: string | null): string {
   if (!d) return 'TBA'
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const iso = d.includes('T') ? d : d + 'T00:00:00'
+  const date = new Date(iso)
+  if (isNaN(date.getTime())) return 'TBA'
+  const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0
+  const opts: Intl.DateTimeFormatOptions = hasTime
+    ? { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }
+    : { month: 'short', day: 'numeric', year: 'numeric' }
+  return date.toLocaleString('en-US', opts)
 }
 
 function AdminRegistrationsPage() {
@@ -39,12 +46,14 @@ function AdminRegistrationsPage() {
   const [registrations, setRegistrations] = useState<Registration[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Filters — schedule + date range (point b) + status + search
+  // Filters — schedule + schedule name (free text) + date range (point b) + status + search
   const [scheduleFilter, setScheduleFilter] = useState<number | null>(null)
+  const [scheduleNameFilter, setScheduleNameFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [search, setSearch] = useState('')
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards')
 
   const [showScheduleEditor, setShowScheduleEditor] = useState(false)
   const [editingSchedule, setEditingSchedule] = useState<RegistrationSchedule | null>(null)
@@ -65,6 +74,7 @@ function AdminRegistrationsPage() {
     const r = await getRegistrations({
       data: {
         scheduleId: scheduleFilter,
+        scheduleName: scheduleNameFilter || null,
         dateFrom: dateFrom || null,
         dateTo: dateTo || null,
         status: statusFilter || null,
@@ -78,13 +88,13 @@ function AdminRegistrationsPage() {
     const heartbeat = await getRegistrationsHeartbeat({ data: { scheduleId: scheduleFilter } })
     knownCountRef.current = heartbeat.count
     knownLatestRef.current = heartbeat.latest
-  }, [scheduleFilter, dateFrom, dateTo, statusFilter, search])
+  }, [scheduleFilter, scheduleNameFilter, dateFrom, dateTo, statusFilter, search])
 
   useEffect(() => {
     setLoading(true)
     Promise.all([loadSchedules(), loadRegistrations()]).finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheduleFilter, dateFrom, dateTo, statusFilter, search])
+  }, [scheduleFilter, scheduleNameFilter, dateFrom, dateTo, statusFilter, search])
 
   // Poll every 15s: cheap heartbeat query only. If the count or latest timestamp
   // moved since our last confirmed load, surface a "new submissions" banner rather
@@ -119,12 +129,37 @@ function AdminRegistrationsPage() {
     if (scheduleFilter === id) setScheduleFilter(null)
   }
 
+  // Flatten registrations into one row per person for the tabular view — a team
+  // registration with a 5-person roster becomes 5 rows, each with their own
+  // position, so the table reads as an actual roster sheet by schedule.
+  const peopleRows = registrations.flatMap((r) => {
+    if (r.regType === 'individual') {
+      return [{
+        regId: r.id, scheduleName: r.scheduleName ?? '', groupName: null as string | null,
+        name: r.name ?? '', position: r.position ?? '', status: r.status,
+        contact: r.email || r.contactNumber || '',
+      }]
+    }
+    if (r.roster.length === 0) {
+      return [{
+        regId: r.id, scheduleName: r.scheduleName ?? '', groupName: r.teamName,
+        name: '(no roster members listed)', position: '', status: r.status, contact: r.email || r.contactNumber || '',
+      }]
+    }
+    return r.roster.map((m) => ({
+      regId: r.id, scheduleName: r.scheduleName ?? '', groupName: r.teamName,
+      name: m.name, position: m.position, status: r.status, contact: r.email || r.contactNumber || '',
+    }))
+  })
+
   const exportCSV = () => {
-    const headers = ['ID', 'Schedule', 'Type', 'Name/Team', 'Roster', 'Contact', 'Email', 'Status', 'Registered']
+    const headers = ['ID', 'Schedule', 'Type', 'Name/Team', 'Position', 'Roster', 'Contact', 'Email', 'Status', 'Registered']
     const rows = registrations.map((r) => [
       r.id, r.scheduleName ?? '', r.regType,
       r.regType === 'individual' ? (r.name ?? '') : (r.teamName ?? ''),
-      r.roster.join(' | '), r.contactNumber ?? '', r.email ?? '', r.status,
+      r.position ?? '',
+      r.roster.map((m) => `${m.name}${m.position ? ` (${m.position})` : ''}`).join(' | '),
+      r.contactNumber ?? '', r.email ?? '', r.status,
       new Date(r.createdAt).toLocaleString(),
     ])
     const csv = [headers, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
@@ -166,7 +201,7 @@ function AdminRegistrationsPage() {
               <button onClick={() => setScheduleFilter(scheduleFilter === s.id ? null : s.id)} className="text-left flex-1">
                 <p className="font-bold text-sm">{s.name}</p>
                 <div className="flex items-center gap-2 mt-1 text-[11px] text-[rgb(var(--muted-fg))]">
-                  <Calendar size={11} /> {formatDate(s.date)}
+                  <Calendar size={11} /> {formatDateTime(s.date)}
                   <span className={`px-1.5 py-0.5 rounded-full font-bold ${s.status === 'active' ? 'bg-green-500/10 text-green-500' : 'bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))]'}`}>
                     {s.status}
                   </span>
@@ -189,6 +224,11 @@ function AdminRegistrationsPage() {
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, contact…"
             className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] focus:outline-none focus:border-blue-500" />
         </div>
+        <div className="relative flex-1 min-w-[160px]">
+          <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))]" />
+          <input value={scheduleNameFilter} onChange={(e) => setScheduleNameFilter(e.target.value)} placeholder="Filter by event/schedule name…"
+            className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] focus:outline-none focus:border-blue-500" />
+        </div>
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Event date from"
           className="px-3 py-2 text-sm rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] focus:outline-none focus:border-blue-500" />
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Event date to"
@@ -205,6 +245,16 @@ function AdminRegistrationsPage() {
           className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-xl border border-[rgb(var(--border-soft))] hover:border-blue-500 transition-colors disabled:opacity-40">
           <Download size={14} /> CSV
         </button>
+        <div className="flex rounded-xl border border-[rgb(var(--border-soft))] overflow-hidden">
+          <button onClick={() => setViewMode('cards')}
+            className={`px-3 py-2 text-xs font-bold transition-colors ${viewMode === 'cards' ? 'bg-blue-600 text-white' : 'bg-[rgb(var(--bg))] text-[rgb(var(--muted-fg))]'}`}>
+            Cards
+          </button>
+          <button onClick={() => setViewMode('table')}
+            className={`px-3 py-2 text-xs font-bold transition-colors ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-[rgb(var(--bg))] text-[rgb(var(--muted-fg))]'}`}>
+            Table
+          </button>
+        </div>
       </div>
 
       {/* Registrations list */}
@@ -212,6 +262,42 @@ function AdminRegistrationsPage() {
         <p className="text-center text-sm text-[rgb(var(--muted-fg))] py-12">Loading…</p>
       ) : registrations.length === 0 ? (
         <p className="text-center text-sm text-[rgb(var(--muted-fg))] py-12">No registrations match your filters.</p>
+      ) : viewMode === 'table' ? (
+        <div className="overflow-x-auto rounded-xl border border-[rgb(var(--border-soft))]">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-[rgb(var(--surface-hover))] text-left text-[11px] uppercase text-[rgb(var(--muted-fg))]">
+                <th className="px-3 py-2.5 font-bold">Schedule</th>
+                <th className="px-3 py-2.5 font-bold">Team/Group</th>
+                <th className="px-3 py-2.5 font-bold">Name</th>
+                <th className="px-3 py-2.5 font-bold">Position</th>
+                <th className="px-3 py-2.5 font-bold">Status</th>
+                <th className="px-3 py-2.5 font-bold">Contact</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[rgb(var(--border-soft))]">
+              {peopleRows.map((p, i) => {
+                const meta = STATUS_META[p.status]
+                return (
+                  <tr key={`${p.regId}-${i}`} className="hover:bg-[rgb(var(--surface-hover))] transition-colors">
+                    <td className="px-3 py-2 text-xs">{p.scheduleName}</td>
+                    <td className="px-3 py-2 text-xs text-[rgb(var(--muted-fg))]">{p.groupName ?? '—'}</td>
+                    <td className="px-3 py-2 font-medium">{p.name}</td>
+                    <td className="px-3 py-2">
+                      {p.position ? (
+                        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500">{p.position}</span>
+                      ) : <span className="text-[rgb(var(--muted-fg))] text-xs">—</span>}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${meta.color}`}>{meta.label}</span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-[rgb(var(--muted-fg))]">{p.contact || '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="space-y-2">
           {registrations.map((r) => {
@@ -220,9 +306,19 @@ function AdminRegistrationsPage() {
             return (
               <div key={r.id} className="p-4 rounded-xl border border-[rgb(var(--border-soft))] flex flex-wrap items-center gap-3">
                 <div className="flex-1 min-w-[200px]">
-                  <p className="font-bold text-sm">{r.regType === 'individual' ? r.name : r.teamName} <span className="text-[10px] font-normal text-[rgb(var(--muted-fg))] uppercase">({r.regType})</span></p>
+                  <p className="font-bold text-sm">
+                    {r.regType === 'individual' ? r.name : r.teamName}{' '}
+                    <span className="text-[10px] font-normal text-[rgb(var(--muted-fg))] uppercase">({r.regType})</span>
+                    {r.regType === 'individual' && r.position && (
+                      <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500">{r.position}</span>
+                    )}
+                  </p>
                   <p className="text-xs text-[rgb(var(--muted-fg))]">{r.scheduleName} • {r.email || r.contactNumber || 'No contact'}</p>
-                  {r.roster.length > 0 && <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-1">Roster: {r.roster.join(', ')}</p>}
+                  {r.roster.length > 0 && (
+                    <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-1">
+                      Roster: {r.roster.map((m) => `${m.name}${m.position ? ` (${m.position})` : ''}`).join(', ')}
+                    </p>
+                  )}
                 </div>
                 <span className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ${meta.color}`}>
                   <Icon size={11} /> {meta.label}
@@ -251,6 +347,17 @@ function AdminRegistrationsPage() {
   )
 }
 
+// Converts a Postgres timestamp string to the exact format <input type="datetime-local">
+// requires (YYYY-MM-DDTHH:mm) — the raw ISO string (with seconds/timezone) won't
+// populate the input correctly otherwise.
+function toDatetimeLocalValue(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 function ScheduleEditorModal({ schedule, onClose, onSaved }: {
   schedule: RegistrationSchedule | null
   onClose: () => void
@@ -258,8 +365,8 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
 }) {
   const [name, setName] = useState(schedule?.name ?? '')
   const [sport, setSport] = useState(schedule?.sport ?? 'Volleyball')
-  const [date, setDate] = useState(schedule?.date ?? '')
-  const [endDate, setEndDate] = useState(schedule?.endDate ?? '')
+  const [date, setDate] = useState(toDatetimeLocalValue(schedule?.date))
+  const [endDate, setEndDate] = useState(toDatetimeLocalValue(schedule?.endDate))
   const [venue, setVenue] = useState(schedule?.venue ?? '')
   const [description, setDescription] = useState(schedule?.description ?? '')
   const [status, setStatus] = useState(schedule?.status ?? 'active')
@@ -314,13 +421,13 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Event Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Event Date & Time</label>
+              <input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)}
                 className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
             </div>
             <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">End Date (optional)</label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">End Date & Time (optional)</label>
+              <input type="datetime-local" value={endDate} onChange={(e) => setEndDate(e.target.value)}
                 className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
             </div>
           </div>
