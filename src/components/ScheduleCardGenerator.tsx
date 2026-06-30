@@ -320,7 +320,7 @@ async function drawCard(
 
     ctx.font = '700 22px Arial'
     ctx.fillStyle = accent
-    ctx.fillText('REBELS VOLLEYBALL CLUB', cx, H - 90)
+    ctx.fillText('THE REBELS VOLLEYBALL', cx, H - 90)
 
   } else {
     if (!photoSource || placement !== 'background') {
@@ -367,7 +367,7 @@ async function drawCard(
 
     ctx.font = '800 24px Arial'
     ctx.fillStyle = accent
-    ctx.fillText('REBELS VOLLEYBALL CLUB', cx, H - 60)
+    ctx.fillText('THE REBELS VOLLEYBALL CLUB', cx, H - 60)
   }
 }
 
