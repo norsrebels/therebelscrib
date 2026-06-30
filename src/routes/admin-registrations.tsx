@@ -29,24 +29,26 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   cancelled:  { label: 'Cancelled',  color: 'text-red-500 bg-red-500/10',      icon: Ban },
 }
 
-function formatDateTime(d: string | Date | null | undefined): string {
-  if (!d) return 'TBA'
-  // r.date can arrive as a Date object (raw driver), an ISO string (after JSON
-  // transport), or a bare 'YYYY-MM-DD' string — handle all three without throwing.
-  let date: Date
-  if (d instanceof Date) {
-    date = d
-  } else if (typeof d === 'string') {
-    date = new Date(d.includes('T') ? d : d + 'T00:00:00')
-  } else {
-    return 'TBA'
-  }
-  if (isNaN(date.getTime())) return 'TBA'
-  const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0
-  const opts: Intl.DateTimeFormatOptions = hasTime
-    ? { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }
-    : { month: 'short', day: 'numeric', year: 'numeric' }
-  return date.toLocaleString('en-US', opts)
+// date is 'YYYY-MM-DD' text, time is 'HH:mm' text — parse manually, format only.
+function formatTime(t: string | null | undefined): string {
+  if (!t) return ''
+  const [h, m] = t.split(':').map(Number)
+  if (isNaN(h)) return ''
+  const period = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m || 0).padStart(2, '0')} ${period}`
+}
+
+function formatScheduleWhen(date: string | null | undefined, time: string | null | undefined): string {
+  if (!date) return 'TBA'
+  const [y, m, d] = date.split('-').map(Number)
+  if (!y || !m || !d) return 'TBA'
+  const dt = new Date(y, m - 1, d)
+  if (isNaN(dt.getTime())) return 'TBA'
+  let out = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const t = formatTime(time)
+  if (t) out += ` • ${t}`
+  return out
 }
 
 function AdminRegistrationsPage() {
@@ -209,7 +211,7 @@ function AdminRegistrationsPage() {
               <button onClick={() => setScheduleFilter(scheduleFilter === s.id ? null : s.id)} className="text-left flex-1">
                 <p className="font-bold text-sm">{s.name}</p>
                 <div className="flex items-center gap-2 mt-1 text-[11px] text-[rgb(var(--muted-fg))]">
-                  <Calendar size={11} /> {formatDateTime(s.date)}
+                  <Calendar size={11} /> {formatScheduleWhen(s.date, s.startTime)}
                   <span className={`px-1.5 py-0.5 rounded-full font-bold ${s.status === 'active' ? 'bg-green-500/10 text-green-500' : 'bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))]'}`}>
                     {s.status}
                   </span>
@@ -355,28 +357,6 @@ function AdminRegistrationsPage() {
   )
 }
 
-// Splits a Postgres timestamp into separate <input type="date"> and
-// <input type="time"> values — easier to fill in on mobile and across browsers
-// than a single datetime-local control.
-function splitDateAndTime(iso: string | null | undefined): { date: string; time: string } {
-  if (!iso) return { date: '', time: '' }
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return { date: '', time: '' }
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return {
-    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
-  }
-}
-
-// Recombines separate date + time inputs into one timestamp string for saving.
-// time is optional — a date with no time saves as midnight, which formatDateTime
-// already treats as "date only" (no time shown) on display.
-function combineDateAndTime(date: string, time: string): string | null {
-  if (!date) return null
-  return `${date}T${time || '00:00'}`
-}
-
 function ScheduleEditorModal({ schedule, onClose, onSaved }: {
   schedule: RegistrationSchedule | null
   onClose: () => void
@@ -384,12 +364,10 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
 }) {
   const [name, setName] = useState(schedule?.name ?? '')
   const [sport, setSport] = useState(schedule?.sport ?? 'Volleyball')
-  const initialDate = splitDateAndTime(schedule?.date)
-  const initialEndDate = splitDateAndTime(schedule?.endDate)
-  const [date, setDate] = useState(initialDate.date)
-  const [startTime, setStartTime] = useState(initialDate.time)
-  const [endDate, setEndDate] = useState(initialEndDate.date)
-  const [endTime, setEndTime] = useState(initialEndDate.time)
+  const [date, setDate] = useState(schedule?.date ?? '')
+  const [startTime, setStartTime] = useState(schedule?.startTime ?? '')
+  const [endDate, setEndDate] = useState(schedule?.endDate ?? '')
+  const [endTime, setEndTime] = useState(schedule?.endTime ?? '')
   const [venue, setVenue] = useState(schedule?.venue ?? '')
   const [description, setDescription] = useState(schedule?.description ?? '')
   const [status, setStatus] = useState(schedule?.status ?? 'active')
@@ -410,7 +388,9 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
     setSaving(true)
     setSaveError('')
     const payload = {
-      name, sport, date: combineDateAndTime(date, startTime), endDate: combineDateAndTime(endDate, endTime),
+      name, sport,
+      date: date || null, startTime: startTime || null,
+      endDate: endDate || null, endTime: endTime || null,
       venue, description,
       capacity: capacity ? parseInt(capacity, 10) : null, status, customFields,
       linkedTournamentExternalId: schedule?.linkedTournamentExternalId ?? null,
