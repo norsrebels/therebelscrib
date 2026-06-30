@@ -25,24 +25,28 @@ const POSITION_OPTIONS = [
   { code: 'L', label: 'Libero' },
 ]
 
-function formatDateTime(d: string | Date | null | undefined): string {
-  if (!d) return 'Date TBA'
-  // r.date can arrive as a Date object (raw driver), an ISO string (after JSON
-  // transport), or a bare 'YYYY-MM-DD' string — handle all three without throwing.
-  let date: Date
-  if (d instanceof Date) {
-    date = d
-  } else if (typeof d === 'string') {
-    date = new Date(d.includes('T') ? d : d + 'T00:00:00')
-  } else {
-    return 'Date TBA'
-  }
-  if (isNaN(date.getTime())) return 'Date TBA'
-  const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0
-  const opts: Intl.DateTimeFormatOptions = hasTime
-    ? { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }
-    : { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }
-  return date.toLocaleString('en-US', opts)
+// Both inputs are plain text now: date is 'YYYY-MM-DD', time is 'HH:mm'.
+// We parse the date parts manually (no Date string parsing / timezone surprises)
+// and only format for display.
+function formatTime(t: string | null | undefined): string {
+  if (!t) return ''
+  const [h, m] = t.split(':').map(Number)
+  if (isNaN(h)) return ''
+  const period = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m || 0).padStart(2, '0')} ${period}`
+}
+
+function formatScheduleWhen(date: string | null | undefined, time: string | null | undefined): string {
+  if (!date) return 'Date TBA'
+  const [y, m, d] = date.split('-').map(Number)
+  if (!y || !m || !d) return 'Date TBA'
+  const dt = new Date(y, m - 1, d)
+  if (isNaN(dt.getTime())) return 'Date TBA'
+  let out = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  const t = formatTime(time)
+  if (t) out += ` • ${t}`
+  return out
 }
 
 function RegistrationPage() {
@@ -171,7 +175,7 @@ function RegistrationPage() {
               <div>
                 <p className="font-bold text-sm">{s.name}</p>
                 <div className="flex items-center gap-3 mt-1 text-xs text-[rgb(var(--muted-fg))]">
-                  <span className="flex items-center gap-1"><Calendar size={12} /> {formatDateTime(s.date)}</span>
+                  <span className="flex items-center gap-1"><Calendar size={12} /> {formatScheduleWhen(s.date, s.startTime)}</span>
                   {s.venue && <span className="flex items-center gap-1"><MapPin size={12} /> {s.venue}</span>}
                 </div>
               </div>
