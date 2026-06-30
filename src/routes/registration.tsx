@@ -25,12 +25,18 @@ const POSITION_OPTIONS = [
   { code: 'L', label: 'Libero' },
 ]
 
-function formatDateTime(d: string | null): string {
+function formatDateTime(d: string | Date | null | undefined): string {
   if (!d) return 'Date TBA'
-  // Timestamps from Postgres arrive as full ISO strings; tolerate a bare
-  // date-only string too (legacy rows) by treating it as midnight.
-  const iso = d.includes('T') ? d : d + 'T00:00:00'
-  const date = new Date(iso)
+  // r.date can arrive as a Date object (raw driver), an ISO string (after JSON
+  // transport), or a bare 'YYYY-MM-DD' string — handle all three without throwing.
+  let date: Date
+  if (d instanceof Date) {
+    date = d
+  } else if (typeof d === 'string') {
+    date = new Date(d.includes('T') ? d : d + 'T00:00:00')
+  } else {
+    return 'Date TBA'
+  }
   if (isNaN(date.getTime())) return 'Date TBA'
   const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0
   const opts: Intl.DateTimeFormatOptions = hasTime
