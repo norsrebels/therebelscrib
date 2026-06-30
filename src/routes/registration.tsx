@@ -4,6 +4,7 @@ import {
   getActiveRegistrationSchedules,
   submitRegistration,
   type RegistrationSchedule,
+  type RosterMember,
 } from '@/server/registration.functions'
 import { Calendar, MapPin, Users, User, UsersRound, Check, AlertTriangle, ChevronDown } from 'lucide-react'
 
@@ -13,9 +14,29 @@ export const Route = createFileRoute('/registration')({
 
 type RegType = 'individual' | 'team' | 'group'
 
-function formatDate(d: string | null): string {
+// Canonical position codes — same set used across roster, player-dex, and the
+// leaderboard, so a registered position always matches what the rest of the app
+// recognizes (OS/OPP/MB/S/L), never a free-typed variant.
+const POSITION_OPTIONS = [
+  { code: 'OS', label: 'Open Spiker' },
+  { code: 'OPP', label: 'Opposite Spiker' },
+  { code: 'MB', label: 'Middle Blocker' },
+  { code: 'S', label: 'Setter' },
+  { code: 'L', label: 'Libero' },
+]
+
+function formatDateTime(d: string | null): string {
   if (!d) return 'Date TBA'
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  // Timestamps from Postgres arrive as full ISO strings; tolerate a bare
+  // date-only string too (legacy rows) by treating it as midnight.
+  const iso = d.includes('T') ? d : d + 'T00:00:00'
+  const date = new Date(iso)
+  if (isNaN(date.getTime())) return 'Date TBA'
+  const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0
+  const opts: Intl.DateTimeFormatOptions = hasTime
+    ? { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }
+    : { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }
+  return date.toLocaleString('en-US', opts)
 }
 
 function RegistrationPage() {
@@ -25,8 +46,12 @@ function RegistrationPage() {
 
   const [regType, setRegType] = useState<RegType>('individual')
   const [name, setName] = useState('')
+  const [position, setPosition] = useState('')
   const [teamName, setTeamName] = useState('')
-  const [roster, setRoster] = useState<string[]>(['', '', '', '', ''])
+  const [roster, setRoster] = useState<RosterMember[]>([
+    { name: '', position: '' }, { name: '', position: '' }, { name: '', position: '' },
+    { name: '', position: '' }, { name: '', position: '' },
+  ])
   const [contactNumber, setContactNumber] = useState('')
   const [email, setEmail] = useState('')
   const [customAnswers, setCustomAnswers] = useState<Record<string, any>>({})
@@ -48,10 +73,13 @@ function RegistrationPage() {
     }
   }, [selected])
 
-  const updateRoster = (i: number, v: string) => {
-    const next = [...roster]; next[i] = v; setRoster(next)
+  const updateRosterName = (i: number, v: string) => {
+    const next = [...roster]; next[i] = { ...next[i], name: v }; setRoster(next)
   }
-  const addRosterSlot = () => setRoster([...roster, ''])
+  const updateRosterPosition = (i: number, v: string) => {
+    const next = [...roster]; next[i] = { ...next[i], position: v }; setRoster(next)
+  }
+  const addRosterSlot = () => setRoster([...roster, { name: '', position: '' }])
   const removeRosterSlot = (i: number) => setRoster(roster.filter((_, idx) => idx !== i))
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -66,6 +94,7 @@ function RegistrationPage() {
       }
     }
     if (regType === 'individual' && !name.trim()) { setError('Please enter your name.'); return }
+    if (regType === 'individual' && !position) { setError('Please select your position.'); return }
     if (regType !== 'individual' && !teamName.trim()) { setError(`Please enter your ${regType} name.`); return }
 
     setSubmitting(true)
@@ -75,8 +104,9 @@ function RegistrationPage() {
           scheduleId: selected.id,
           regType,
           name,
+          position,
           teamName,
-          roster: regType === 'individual' ? [] : roster.filter((r) => r.trim()),
+          roster: regType === 'individual' ? [] : roster.filter((r) => r.name.trim()),
           contactNumber,
           email,
           customAnswers,
@@ -135,7 +165,7 @@ function RegistrationPage() {
               <div>
                 <p className="font-bold text-sm">{s.name}</p>
                 <div className="flex items-center gap-3 mt-1 text-xs text-[rgb(var(--muted-fg))]">
-                  <span className="flex items-center gap-1"><Calendar size={12} /> {formatDate(s.date)}</span>
+                  <span className="flex items-center gap-1"><Calendar size={12} /> {formatDateTime(s.date)}</span>
                   {s.venue && <span className="flex items-center gap-1"><MapPin size={12} /> {s.venue}</span>}
                 </div>
               </div>
@@ -171,10 +201,23 @@ function RegistrationPage() {
           </div>
 
           {regType === 'individual' ? (
-            <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Full Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} required
-                className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2.5 focus:outline-none focus:border-blue-500" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Full Name</label>
+                <input value={name} onChange={(e) => setName(e.target.value)} required
+                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2.5 focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Position</label>
+                <div className="relative">
+                  <select value={position} onChange={(e) => setPosition(e.target.value)} required
+                    className="w-full appearance-none text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2.5 pr-9 focus:outline-none focus:border-blue-500">
+                    <option value="">Select…</option>
+                    {POSITION_OPTIONS.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
+                  </select>
+                  <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))]" />
+                </div>
+              </div>
             </div>
           ) : (
             <>
@@ -188,9 +231,17 @@ function RegistrationPage() {
                 <div className="space-y-2">
                   {roster.map((member, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <input value={member} onChange={(e) => updateRoster(i, e.target.value)}
+                      <input value={member.name} onChange={(e) => updateRosterName(i, e.target.value)}
                         placeholder={`Member ${i + 1}`}
                         className="flex-1 text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+                      <div className="relative w-36">
+                        <select value={member.position} onChange={(e) => updateRosterPosition(i, e.target.value)}
+                          className="w-full appearance-none text-xs rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-2.5 py-2 pr-7 focus:outline-none focus:border-blue-500">
+                          <option value="">Position…</option>
+                          {POSITION_OPTIONS.map((p) => <option key={p.code} value={p.code}>{p.code}</option>)}
+                        </select>
+                        <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[rgb(var(--muted-fg))]" />
+                      </div>
                       {roster.length > 1 && (
                         <button type="button" onClick={() => removeRosterSlot(i)} className="text-[rgb(var(--muted-fg))] hover:text-red-500 text-xs px-2">✕</button>
                       )}
