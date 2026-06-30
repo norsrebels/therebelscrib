@@ -24,8 +24,10 @@ export interface RegistrationSchedule {
   id: number
   name: string
   sport: string
-  date: string | null
+  date: string | null        // 'YYYY-MM-DD' plain text
+  startTime: string | null   // 'HH:mm' plain text
   endDate: string | null
+  endTime: string | null
   venue: string | null
   description: string | null
   status: 'active' | 'closed' | 'archived'
@@ -63,7 +65,9 @@ function mapSchedule(r: any): RegistrationSchedule {
     name: r.name,
     sport: r.sport,
     date: r.date,
+    startTime: r.start_time,
     endDate: r.end_date,
+    endTime: r.end_time,
     venue: r.venue,
     description: r.description,
     status: r.status,
@@ -125,36 +129,23 @@ export const getAllRegistrationSchedules = createServerFn({ method: 'GET' }).han
 })
 
 // ─── Admin: create a registration schedule ──────────────────────────────────────
-// Normalizes a datetime string to a full, unambiguous ISO format Postgres always
-// parses the same way (YYYY-MM-DDTHH:mm:ss), and explicitly casts it in SQL.
-// Without this, a string like "2026-07-15T18:00" (no seconds, from a combined
-// date+time input) can bind inconsistently as a timestamp parameter and silently
-// end up NULL — this is what was causing schedules to save with no date.
-function normalizeTimestamp(value: string | null): string | null {
-  if (!value) return null
-  // Already has seconds? leave as-is. Otherwise pad with :00.
-  const hasSeconds = /T\d{2}:\d{2}:\d{2}/.test(value)
-  return hasSeconds ? value : `${value}:00`
-}
-
 export const createRegistrationSchedule = createServerFn({ method: 'POST' })
   .inputValidator((data: {
-    name: string; sport: string; date: string | null; endDate: string | null
+    name: string; sport: string
+    date: string | null; startTime: string | null; endDate: string | null; endTime: string | null
     venue: string; description: string; capacity: number | null; status?: string
     customFields: CustomFieldDefinition[]; linkedTournamentExternalId: string | null
   }) => data)
   .handler(async ({ data }) => {
     const admin = await getAdminUser()
     if (!admin) throw new Error('Admin access required')
-    const normDate = normalizeTimestamp(data.date)
-    const normEndDate = normalizeTimestamp(data.endDate)
     return withRetry(async () => {
       const rows = await db.execute(sql`
         INSERT INTO registration_schedules
-          (name, sport, date, end_date, venue, description, capacity, status, custom_fields, linked_tournament_external_id)
+          (name, sport, date, start_time, end_date, end_time, venue, description, capacity, status, custom_fields, linked_tournament_external_id)
         VALUES (
           ${data.name}, ${data.sport || 'Volleyball'},
-          ${normDate}::timestamp, ${normEndDate}::timestamp,
+          ${data.date || null}, ${data.startTime || null}, ${data.endDate || null}, ${data.endTime || null},
           ${data.venue}, ${data.description}, ${data.capacity}, ${data.status || 'active'},
           ${JSON.stringify(data.customFields ?? [])}::jsonb, ${data.linkedTournamentExternalId}
         )
@@ -167,20 +158,20 @@ export const createRegistrationSchedule = createServerFn({ method: 'POST' })
 // ─── Admin: update a registration schedule ──────────────────────────────────────
 export const updateRegistrationSchedule = createServerFn({ method: 'POST' })
   .inputValidator((data: {
-    id: number; name: string; sport: string; date: string | null; endDate: string | null
+    id: number; name: string; sport: string
+    date: string | null; startTime: string | null; endDate: string | null; endTime: string | null
     venue: string; description: string; status: string; capacity: number | null
     customFields: CustomFieldDefinition[]; linkedTournamentExternalId: string | null
   }) => data)
   .handler(async ({ data }) => {
     const admin = await getAdminUser()
     if (!admin) throw new Error('Admin access required')
-    const normDate = normalizeTimestamp(data.date)
-    const normEndDate = normalizeTimestamp(data.endDate)
     return withRetry(async () => {
       const rows = await db.execute(sql`
         UPDATE registration_schedules SET
           name = ${data.name}, sport = ${data.sport},
-          date = ${normDate}::timestamp, end_date = ${normEndDate}::timestamp,
+          date = ${data.date || null}, start_time = ${data.startTime || null},
+          end_date = ${data.endDate || null}, end_time = ${data.endTime || null},
           venue = ${data.venue}, description = ${data.description}, status = ${data.status},
           capacity = ${data.capacity}, custom_fields = ${JSON.stringify(data.customFields ?? [])}::jsonb,
           linked_tournament_external_id = ${data.linkedTournamentExternalId}, updated_at = now()
@@ -264,10 +255,10 @@ export const getRegistrations = createServerFn({ method: 'GET' })
       if (data.status) conditions.push(sql`r.status = ${data.status}`)
       // Filter by the schedule's event date (not the registration submission date) —
       // this answers "who's registered for events happening in this date range."
-      if (data.dateFrom) conditions.push(sql`s.date >= ${data.dateFrom}::date`)
-      // dateTo is inclusive of the whole day — without the +1 day boundary, an event
-      // later on the dateTo day itself would be wrongly excluded (timestamp > midnight).
-      if (data.dateTo) conditions.push(sql`s.date < (${data.dateTo}::date + interval '1 day')`)
+      // date is plain 'YYYY-MM-DD' text now, so lexical comparison sorts and
+      // ranges correctly — and dateTo is naturally inclusive (no time component).
+      if (data.dateFrom) conditions.push(sql`s.date >= ${data.dateFrom}`)
+      if (data.dateTo) conditions.push(sql`s.date <= ${data.dateTo}`)
       if (data.search) {
         const term = `%${data.search.toLowerCase()}%`
         conditions.push(sql`(
@@ -293,4 +284,48 @@ export const getRegistrations = createServerFn({ method: 'GET' })
 // ─── Admin: update a registration's status ──────────────────────────────────────
 export const updateRegistrationStatus = createServerFn({ method: 'POST' })
   .inputValidator((data: { id: number; status: 'pending' | 'confirmed' | 'cancelled' | 'waitlisted' }) => data)
-  .handl
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
+    return withRetry(async () => {
+      const rows = await db.execute(sql`
+        UPDATE registrations SET status = ${data.status}, updated_at = now()
+        WHERE id = ${data.id}
+        RETURNING *
+      `)
+      return mapRegistration(rows.rows[0])
+    })
+  })
+
+// ─── Admin: delete a registration ───────────────────────────────────────────────
+export const deleteRegistration = createServerFn({ method: 'POST' })
+  .inputValidator((data: { id: number }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
+    return withRetry(async () => {
+      await db.execute(sql`DELETE FROM registrations WHERE id = ${data.id}`)
+      return { ok: true }
+    })
+  })
+
+// ─── Lightweight polling endpoint: just the count + latest timestamp ───────────
+// Cheap enough to poll every 15-20s without hammering the DB; the admin UI
+// compares this against what it has and only refetches the full list when it
+// detects something new, which is how we "assure data will be there" without
+// constantly re-running the heavier filtered query.
+export const getRegistrationsHeartbeat = createServerFn({ method: 'GET' })
+  .inputValidator((data: { scheduleId?: number | null }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) return { count: 0, latest: null }
+    return withRetry(async () => {
+      const rows = await db.execute(
+        data.scheduleId
+          ? sql`SELECT COUNT(*)::int AS count, MAX(created_at) AS latest FROM registrations WHERE schedule_id = ${data.scheduleId}`
+          : sql`SELECT COUNT(*)::int AS count, MAX(created_at) AS latest FROM registrations`
+      )
+      const row = rows.rows[0] as any
+      return { count: Number(row?.count ?? 0), latest: row?.latest ?? null }
+    })
+  })
