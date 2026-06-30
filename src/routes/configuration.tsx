@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-client";
 import { useState, useEffect } from "react";
-import { useRouter } from "@tanstack/react-router";
+import { useRouter, Link } from "@tanstack/react-router";
 import { getSettings, saveSettings } from "@/server/assessment.functions";
 import {
   getAllSiteSettings,
@@ -11,7 +11,7 @@ import {
   getChatbotConfig,
   saveChatbotConfig,
 } from "@/server/chatbot.functions";
-import { Facebook, Instagram, Mail, MessageCircle, Plus, Trash2, RotateCcw } from "lucide-react";
+import { Facebook, Instagram, Mail, MessageCircle, Plus, Trash2, RotateCcw, ClipboardList, ChevronRight } from "lucide-react";
 import { useToast } from "@/lib/use-toast";
 import { ToastBar } from "@/components/Modals";
 
@@ -242,6 +242,24 @@ function ConfigurationPage() {
   return (
     <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
       <h1 className="text-3xl font-bold mb-8 tracking-tight">Configuration</h1>
+
+      {/* Registrations quick link */}
+      <Link
+        to="/admin-registrations"
+        className="block bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-2xl p-6 shadow-sm mb-8 hover:border-blue-500/40 transition-colors"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold mb-1 flex items-center gap-2">
+              <ClipboardList size={18} /> Player Registrations
+            </h2>
+            <p className="text-sm text-[rgb(var(--muted-fg))]">
+              Create signup schedules, review submissions, and manage confirmed/waitlisted/cancelled status.
+            </p>
+          </div>
+          <ChevronRight size={18} className="text-[rgb(var(--muted-fg))] shrink-0" />
+        </div>
+      </Link>
 
       {/* Social Media Settings */}
       <div className="bg-[rgb(var(--surface))] border border-[rgb(var(--border))] rounded-2xl p-6 shadow-sm mb-8">
