@@ -121,7 +121,7 @@ export const getAllRegistrationSchedules = createServerFn({ method: 'GET' }).han
 export const createRegistrationSchedule = createServerFn({ method: 'POST' })
   .inputValidator((data: {
     name: string; sport: string; date: string | null; endDate: string | null
-    venue: string; description: string; capacity: number | null
+    venue: string; description: string; capacity: number | null; status?: string
     customFields: CustomFieldDefinition[]; linkedTournamentExternalId: string | null
   }) => data)
   .handler(async ({ data }) => {
@@ -130,10 +130,10 @@ export const createRegistrationSchedule = createServerFn({ method: 'POST' })
     return withRetry(async () => {
       const rows = await db.execute(sql`
         INSERT INTO registration_schedules
-          (name, sport, date, end_date, venue, description, capacity, custom_fields, linked_tournament_external_id)
+          (name, sport, date, end_date, venue, description, capacity, status, custom_fields, linked_tournament_external_id)
         VALUES (
           ${data.name}, ${data.sport || 'Volleyball'}, ${data.date}, ${data.endDate},
-          ${data.venue}, ${data.description}, ${data.capacity},
+          ${data.venue}, ${data.description}, ${data.capacity}, ${data.status || 'active'},
           ${JSON.stringify(data.customFields ?? [])}::jsonb, ${data.linkedTournamentExternalId}
         )
         RETURNING *
