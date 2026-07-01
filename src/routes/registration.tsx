@@ -71,7 +71,18 @@ function RegistrationPage() {
 
   useEffect(() => {
     getActiveRegistrationSchedules()
-      .then((s) => { setSchedules(s); if (s.length === 1) setSelected(s[0]) })
+      .then((s) => {
+        setSchedules(s)
+        // Deep link: ?schedule=ID pre-selects that schedule (from a QR code).
+        let preselectId: number | null = null
+        if (typeof window !== 'undefined') {
+          const p = new URLSearchParams(window.location.search).get('schedule')
+          if (p) preselectId = parseInt(p, 10)
+        }
+        const match = preselectId ? s.find((x) => x.id === preselectId) : null
+        if (match) setSelected(match)
+        else if (s.length === 1) setSelected(s[0])
+      })
       .finally(() => setLoading(false))
   }, [])
 
