@@ -12,8 +12,9 @@ import { getGalleryImages, type GalleryImage } from '@/server/gallery.functions'
 import { FONT_OPTIONS, loadFont, fontFamily, type FontChoice } from '@/lib/schedule-card-fonts'
 
 type Template = 'bold' | 'minimal' | 'energetic' | 'gradientPop' | 'nightCourt' | 'retroBlock'
-type ImageTreatment = 'photo' | 'silhouette'
-type ImagePlacement = 'header' | 'background' | 'side'
+type ImageTreatment = 'photo' | 'silhouette' | 'grayscale' | 'duotone' | 'blur' | 'tint'
+type ImagePlacement = 'header' | 'footer' | 'background' | 'side' | 'badge'
+type SidePosition = 'left' | 'right'
 type Alignment = 'left' | 'center' | 'right'
 type BackgroundStyle = 'solid' | 'gradient' | 'pattern'
 type Dimension = 'portrait' | 'square' | 'banner' | 'story'
@@ -167,6 +168,51 @@ function buildSilhouetteCanvas(img: HTMLImageElement, accentRGB: string): HTMLCa
   return off
 }
 
+// Applies a full-image treatment (grayscale / duotone / blur / tint) and returns
+// a canvas. 'photo' returns the image untouched; 'silhouette' is handled separately.
+function processImage(img: HTMLImageElement, treatment: ImageTreatment, accentRGB: string): HTMLImageElement | HTMLCanvasElement {
+  if (treatment === 'photo') return img
+  if (treatment === 'silhouette') return buildSilhouetteCanvas(img, accentRGB)
+
+  const off = document.createElement('canvas')
+  off.width = img.width
+  off.height = img.height
+  const octx = off.getContext('2d')!
+  const [ar, ag, ab] = accentRGB.split(',').map((n) => parseInt(n.trim(), 10))
+
+  if (treatment === 'blur') {
+    // Canvas filter blur, scaled to image size so it reads on large canvases.
+    octx.filter = `blur(${Math.round(img.width * 0.012)}px)`
+    octx.drawImage(img, 0, 0)
+    octx.filter = 'none'
+    return off
+  }
+
+  octx.drawImage(img, 0, 0)
+  const imageData = octx.getImageData(0, 0, off.width, off.height)
+  const data = imageData.data
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2]
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b
+    if (treatment === 'grayscale') {
+      data[i] = data[i + 1] = data[i + 2] = lum
+    } else if (treatment === 'duotone') {
+      // Map luminance between dark and the accent color (two-tone).
+      const t = lum / 255
+      data[i] = Math.round(20 + (ar - 20) * t)
+      data[i + 1] = Math.round(20 + (ag - 20) * t)
+      data[i + 2] = Math.round(20 + (ab - 20) * t)
+    } else if (treatment === 'tint') {
+      // Keep the photo but wash it toward the accent color.
+      data[i] = Math.round(r * 0.55 + ar * 0.45)
+      data[i + 1] = Math.round(g * 0.55 + ag * 0.45)
+      data[i + 2] = Math.round(b * 0.55 + ab * 0.45)
+    }
+  }
+  octx.putImageData(imageData, 0, 0)
+  return off
+}
+
 // A stack element to be laid out vertically and centered in the content area.
 type StackItem =
   | { kind: 'text'; text: string; font: string; color: string; gapAfter: number; lineHeight: number; maxWidth?: number }
@@ -266,6 +312,7 @@ async function drawCard(
   photo: HTMLImageElement | null,
   treatment: ImageTreatment,
   placement: ImagePlacement,
+  sidePos: SidePosition,
   scaleFactor: number = 1
 ) {
   const ctx = canvas.getContext('2d')
@@ -288,8 +335,9 @@ async function drawCard(
   const { day, month, weekday } = formatDateDisplay(data.date)
   const timeRange = `${formatTimeDisplay(data.startTime)} – ${formatTimeDisplay(data.endTime)}`
 
+  const isSilhouette = treatment === 'silhouette'
   const photoSource: HTMLImageElement | HTMLCanvasElement | null =
-    photo ? (treatment === 'silhouette' ? buildSilhouetteCanvas(photo, style.accentRGB) : photo) : null
+    photo ? processImage(photo, treatment, style.accentRGB) : null
 
   const lightTheme = template === 'minimal'
   const isDark = !lightTheme
@@ -317,7 +365,7 @@ async function drawCard(
 
   if (photoSource && placement === 'background') {
     ctx.save()
-    if (treatment === 'silhouette') {
+    if (isSilhouette) {
       ctx.globalAlpha = 0.5
       const s = Math.min(W / (photoSource as any).width, H / (photoSource as any).height) * 1.1
       const pw = (photoSource as any).width * s, ph = (photoSource as any).height * s
@@ -335,17 +383,17 @@ async function drawCard(
   }
 
   if (photoSource && placement === 'header') {
-    const bandH = H * (dimension === 'banner' ? 1 : 0.32)
     if (dimension === 'banner') {
-      // On a wide banner, header photo makes more sense as a side image.
+      // On a wide banner, a top band is too short — render as a side image instead.
       const sideW = W * 0.32
       ctx.save(); ctx.beginPath(); ctx.rect(0, 0, sideW, H); ctx.clip()
       drawCover(ctx, photoSource as HTMLImageElement, 0, 0, sideW, H)
       ctx.fillStyle = accent; ctx.fillRect(sideW - 5 * U, 0, 5 * U, H); ctx.restore()
       contentLeft = sideW; contentWidth = W - sideW
     } else {
+      const bandH = H * 0.32
       ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, bandH); ctx.clip()
-      if (treatment === 'silhouette') {
+      if (isSilhouette) {
         ctx.fillStyle = isDark ? '#15151c' : '#eeeeee'; ctx.fillRect(0, 0, W, bandH)
         const s = Math.min(W / (photoSource as any).width, bandH / (photoSource as any).height) * 1.15
         const pw = (photoSource as any).width * s, ph = (photoSource as any).height * s
@@ -362,20 +410,73 @@ async function drawCard(
     }
   }
 
+  if (photoSource && placement === 'footer') {
+    // Mirror of header — a photo band across the bottom.
+    const bandH = H * 0.30
+    const bandTop = H - bandH
+    ctx.save(); ctx.beginPath(); ctx.rect(0, bandTop, W, bandH); ctx.clip()
+    if (isSilhouette) {
+      ctx.fillStyle = isDark ? '#15151c' : '#eeeeee'; ctx.fillRect(0, bandTop, W, bandH)
+      const s = Math.min(W / (photoSource as any).width, bandH / (photoSource as any).height) * 1.15
+      const pw = (photoSource as any).width * s, ph = (photoSource as any).height * s
+      ctx.drawImage(photoSource, (W - pw) / 2, bandTop, pw, ph)
+    } else {
+      drawCover(ctx, photoSource as HTMLImageElement, 0, bandTop, W, bandH)
+      const fade = ctx.createLinearGradient(0, bandTop, 0, bandTop + 140 * U)
+      fade.addColorStop(0, template === 'retroBlock' ? '#f4ede0' : (isDark ? '#0e0e14' : '#fafafa'))
+      fade.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.fillStyle = fade; ctx.fillRect(0, bandTop, W, 140 * U)
+    }
+    ctx.restore()
+    contentHeight = bandTop
+  }
+
   if (photoSource && placement === 'side') {
     const sideW = W * 0.34
-    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, sideW, H); ctx.clip()
-    if (treatment === 'silhouette') {
-      ctx.fillStyle = isDark ? '#15151c' : '#eeeeee'; ctx.fillRect(0, 0, sideW, H)
+    const onLeft = sidePos === 'left'
+    const sx = onLeft ? 0 : W - sideW
+    ctx.save(); ctx.beginPath(); ctx.rect(sx, 0, sideW, H); ctx.clip()
+    if (isSilhouette) {
+      ctx.fillStyle = isDark ? '#15151c' : '#eeeeee'; ctx.fillRect(sx, 0, sideW, H)
       const s = Math.max(sideW / (photoSource as any).width, H / (photoSource as any).height) * 1.05
       const pw = (photoSource as any).width * s, ph = (photoSource as any).height * s
-      ctx.drawImage(photoSource, (sideW - pw) / 2, (H - ph) / 2, pw, ph)
+      ctx.drawImage(photoSource, sx + (sideW - pw) / 2, (H - ph) / 2, pw, ph)
     } else {
-      drawCover(ctx, photoSource as HTMLImageElement, 0, 0, sideW, H)
-      ctx.fillStyle = isDark ? 'rgba(10,10,15,0.25)' : 'rgba(250,250,250,0.2)'; ctx.fillRect(0, 0, sideW, H)
+      drawCover(ctx, photoSource as HTMLImageElement, sx, 0, sideW, H)
+      ctx.fillStyle = isDark ? 'rgba(10,10,15,0.25)' : 'rgba(250,250,250,0.2)'; ctx.fillRect(sx, 0, sideW, H)
     }
-    ctx.fillStyle = accent; ctx.fillRect(sideW - 5 * U, 0, 5 * U, H); ctx.restore()
-    contentLeft = sideW; contentWidth = W - sideW
+    // accent divider on the inner edge
+    ctx.fillStyle = accent
+    ctx.fillRect(onLeft ? sideW - 5 * U : W - sideW, 0, 5 * U, H)
+    ctx.restore()
+    if (onLeft) { contentLeft = sideW; contentWidth = W - sideW }
+    else { contentLeft = 0; contentWidth = W - sideW }
+  }
+
+  if (photoSource && placement === 'badge') {
+    // Circular avatar-style photo near the top of the content area.
+    const r = Math.min(contentWidth, contentHeight) * (dimension === 'banner' ? 0.28 : 0.16)
+    const bcx = contentLeft + contentWidth / 2
+    const bcy = contentTop + r + 40 * U
+    ctx.save()
+    ctx.beginPath(); ctx.arc(bcx, bcy, r, 0, Math.PI * 2); ctx.closePath(); ctx.clip()
+    if (isSilhouette) {
+      ctx.fillStyle = isDark ? '#15151c' : '#eeeeee'; ctx.fillRect(bcx - r, bcy - r, r * 2, r * 2)
+    }
+    // cover-fit into the circle's bounding box
+    const src = photoSource as any
+    const box = r * 2
+    const ratio = src.width / src.height
+    let dw = box, dh = box
+    if (ratio > 1) { dw = box * ratio } else { dh = box / ratio }
+    ctx.drawImage(photoSource, bcx - dw / 2, bcy - dh / 2, dw, dh)
+    ctx.restore()
+    // accent ring
+    ctx.beginPath(); ctx.arc(bcx, bcy, r, 0, Math.PI * 2)
+    ctx.strokeStyle = accent; ctx.lineWidth = 8 * U; ctx.stroke()
+    // push content below the badge
+    contentTop = bcy + r + 20 * U
+    contentHeight = H - contentTop
   }
 
   // ── Theme-specific accent shapes ──
@@ -492,6 +593,7 @@ export function ScheduleCardGenerator({
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [treatment, setTreatment] = useState<ImageTreatment>('photo')
   const [placement, setPlacement] = useState<ImagePlacement>('header')
+  const [sidePos, setSidePos] = useState<SidePosition>('left')
   const [showGalleryPicker, setShowGalleryPicker] = useState(false)
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([])
   const [loadingGallery, setLoadingGallery] = useState(false)
@@ -549,9 +651,9 @@ export function ScheduleCardGenerator({
     drawCard(
       canvasRef.current, template, dimension,
       { scheduleName: scheduleName || 'Tournament', venue, date, startTime, endTime, quote },
-      buildStyle(), logoRef.current, photoRef.current, treatment, placement, 1
+      buildStyle(), logoRef.current, photoRef.current, treatment, placement, sidePos, 1
     )
-  }, [template, dimension, venue, date, startTime, endTime, quote, scheduleName, treatment, placement,
+  }, [template, dimension, venue, date, startTime, endTime, quote, scheduleName, treatment, placement, sidePos,
       useCustomAccent, customAccentHex, font, align, textColorMode, customTextHex, showLogo, logoH, logoV,
       footerText, background, titleSize, showQuote])
 
@@ -581,6 +683,7 @@ export function ScheduleCardGenerator({
     setTitleSize(pick<TitleSize>(['small', 'normal', 'big', 'huge']))
     setLogoH(pick<LogoH>(['left', 'center', 'right']))
     setLogoV(pick<LogoV>(['top', 'bottom']))
+    setSidePos(pick<SidePosition>(['left', 'right']))
     setQuote(randomQuote())
   }
 
@@ -602,7 +705,7 @@ export function ScheduleCardGenerator({
     if (retina && target) {
       drawCard(target, template, dimension,
         { scheduleName: scheduleName || 'Tournament', venue, date, startTime, endTime, quote },
-        buildStyle(), logoRef.current, photoRef.current, treatment, placement, 2)
+        buildStyle(), logoRef.current, photoRef.current, treatment, placement, sidePos, 2)
       // drawCard is async only for silhouette setup which is sync here; give it a tick.
       setTimeout(() => finish(target), 50)
     } else {
@@ -681,19 +784,32 @@ export function ScheduleCardGenerator({
               <>
                 <div>
                   <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Treatment</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <SegBtn active={treatment === 'photo'} onClick={() => setTreatment('photo')}>Full Photo</SegBtn>
                     <SegBtn active={treatment === 'silhouette'} onClick={() => setTreatment('silhouette')}>Silhouette</SegBtn>
+                    <SegBtn active={treatment === 'grayscale'} onClick={() => setTreatment('grayscale')}>Grayscale</SegBtn>
+                    <SegBtn active={treatment === 'duotone'} onClick={() => setTreatment('duotone')}>Duotone</SegBtn>
+                    <SegBtn active={treatment === 'blur'} onClick={() => setTreatment('blur')}>Blur</SegBtn>
+                    <SegBtn active={treatment === 'tint'} onClick={() => setTreatment('tint')}>Tint</SegBtn>
                   </div>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Placement</label>
                   <div className="grid grid-cols-3 gap-2">
-                    {(['header', 'background', 'side'] as ImagePlacement[]).map((p) => (
+                    {(['header', 'footer', 'background', 'side', 'badge'] as ImagePlacement[]).map((p) => (
                       <SegBtn key={p} active={placement === p} onClick={() => setPlacement(p)}>{p}</SegBtn>
                     ))}
                   </div>
                 </div>
+                {placement === 'side' && (
+                  <div>
+                    <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Side Position</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <SegBtn active={sidePos === 'left'} onClick={() => setSidePos('left')}>Left</SegBtn>
+                      <SegBtn active={sidePos === 'right'} onClick={() => setSidePos('right')}>Right</SegBtn>
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
