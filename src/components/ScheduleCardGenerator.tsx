@@ -10,6 +10,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { X, Download, Sparkles, Image as ImageIcon, Upload, Images, Trash2, Palette, Shuffle } from 'lucide-react'
 import { getGalleryImages, type GalleryImage } from '@/server/gallery.functions'
 import { FONT_OPTIONS, loadFont, fontFamily, type FontChoice } from '@/lib/schedule-card-fonts'
+import { drawQrToCanvas, registrationUrl } from '@/lib/qrcode'
 
 type Template = 'bold' | 'minimal' | 'energetic' | 'gradientPop' | 'nightCourt' | 'retroBlock'
 type ImageTreatment = 'photo' | 'silhouette' | 'grayscale' | 'duotone' | 'blur' | 'tint'
@@ -52,6 +53,7 @@ interface CardStyle {
   background: BackgroundStyle
   titleSize: TitleSize
   showQuote: boolean
+  showQR: boolean
 }
 
 const QUOTES = [
@@ -564,6 +566,30 @@ async function drawCard(
   ctx.font = `700 ${footerPx}px ${fam}`
   ctx.fillStyle = accent
   ctx.fillText(upper(style.footerText), contentLeft + contentWidth / 2, contentTop + contentHeight - 40 * U)
+
+  // Optional QR code — links to the registration page so people can scan & sign up.
+  // Placed in a bottom corner (opposite the side image, if any) on a white chip.
+  if (style.showQR) {
+    const qrSize = Math.min(contentWidth, H) * (dimension === 'banner' ? 0.5 : 0.22)
+    const pad = 36 * U
+    // avoid the side-image column: put QR on the side with more room
+    const qx = contentLeft + contentWidth - qrSize - pad
+    const qy = contentTop + contentHeight - qrSize - pad
+    const chip = qrSize + 20 * U
+    ctx.save()
+    ctx.fillStyle = '#ffffff'
+    ctx.strokeStyle = accent
+    ctx.lineWidth = 4 * U
+    const cxp = qx - 10 * U, cyp = qy - 10 * U
+    ctx.fillRect(cxp, cyp, chip, chip)
+    ctx.strokeRect(cxp, cyp, chip, chip)
+    drawQrToCanvas(ctx, registrationUrl(), qx, qy, qrSize, '#111111', '#ffffff', 1)
+    ctx.font = `700 ${11 * U}px ${fam}`
+    ctx.fillStyle = '#111111'
+    ctx.textAlign = 'center'
+    ctx.fillText('SCAN TO REGISTER', cxp + chip / 2, cyp + chip + 20 * U)
+    ctx.restore()
+  }
 }
 
 export function ScheduleCardGenerator({
@@ -612,6 +638,7 @@ export function ScheduleCardGenerator({
   const [background, setBackground] = useState<BackgroundStyle>('gradient')
   const [titleSize, setTitleSize] = useState<TitleSize>('normal')
   const [showQuote, setShowQuote] = useState(true)
+  const [showQR, setShowQR] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const logoRef = useRef<HTMLImageElement | null>(null)
@@ -643,7 +670,7 @@ export function ScheduleCardGenerator({
     textColor: textColorMode === 'custom' ? customTextHex : 'auto',
     showLogo, logoH, logoV,
     footerText: footerText || 'The Rebels Volleyball',
-    background, titleSize, showQuote,
+    background, titleSize, showQuote, showQR,
   })
 
   const render = useCallback(() => {
@@ -655,7 +682,7 @@ export function ScheduleCardGenerator({
     )
   }, [template, dimension, venue, date, startTime, endTime, quote, scheduleName, treatment, placement, sidePos,
       useCustomAccent, customAccentHex, font, align, textColorMode, customTextHex, showLogo, logoH, logoV,
-      footerText, background, titleSize, showQuote])
+      footerText, background, titleSize, showQuote, showQR])
 
   useEffect(() => { render() }, [render])
 
@@ -873,6 +900,13 @@ export function ScheduleCardGenerator({
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Show Quote</label>
                 <button onClick={() => setShowQuote(!showQuote)} className={`w-11 h-6 rounded-full transition-colors relative ${showQuote ? 'bg-blue-600' : 'bg-[rgb(var(--border-soft))]'}`}>
                   <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${showQuote ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+
+              <div className="mb-4 flex items-center justify-between">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Show QR (Scan to Register)</label>
+                <button onClick={() => setShowQR(!showQR)} className={`w-11 h-6 rounded-full transition-colors relative ${showQR ? 'bg-blue-600' : 'bg-[rgb(var(--border-soft))]'}`}>
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${showQR ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
 
