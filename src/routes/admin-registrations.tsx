@@ -58,6 +58,7 @@ function AdminRegistrationsPage() {
 
   // Filters — schedule + schedule name (free text) + date range (point b) + status + search
   const [scheduleFilter, setScheduleFilter] = useState<number | null>(null)
+  const [scheduleView, setScheduleView] = useState<'active' | 'archived'>('active')
   const [scheduleNameFilter, setScheduleNameFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -132,10 +133,26 @@ function AdminRegistrationsPage() {
     setRegistrations((prev) => prev.filter((r) => r.id !== id))
   }
 
+  const handleRestoreSchedule = async (id: number) => {
+    const s = schedules.find((x) => x.id === id)
+    if (!s) return
+    await updateRegistrationSchedule({
+      data: {
+        id, name: s.name, sport: s.sport,
+        date: s.date, startTime: s.startTime, endDate: s.endDate, endTime: s.endTime,
+        venue: s.venue ?? '', description: s.description ?? '', status: 'active',
+        capacity: s.capacity, customFields: s.customFields,
+        linkedTournamentExternalId: s.linkedTournamentExternalId ?? null,
+      },
+    })
+    setSchedules((prev) => prev.map((x) => (x.id === id ? { ...x, status: 'active' as const } : x)))
+  }
+
   const handleDeleteSchedule = async (id: number) => {
-    if (!confirm('Delete this schedule and all its registrations? This cannot be undone.')) return
+    if (!confirm('Archive this schedule? It will be hidden from the public registration page, but all its registration history is preserved and can be viewed under the Archived filter.')) return
     await deleteRegistrationSchedule({ data: { id } })
-    setSchedules((prev) => prev.filter((s) => s.id !== id))
+    // Reflect the new archived status locally (the row is kept, not removed).
+    setSchedules((prev) => prev.map((s) => (s.id === id ? { ...s, status: 'archived' as const } : s)))
     if (scheduleFilter === id) setScheduleFilter(null)
   }
 
@@ -204,8 +221,27 @@ function AdminRegistrationsPage() {
       )}
 
       {/* Schedules list */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="flex rounded-xl border border-[rgb(var(--border-soft))] overflow-hidden">
+          <button onClick={() => { setScheduleView('active'); setScheduleFilter(null) }}
+            className={`px-3 py-1.5 text-xs font-bold transition-colors ${scheduleView === 'active' ? 'bg-blue-600 text-white' : 'bg-[rgb(var(--bg))] text-[rgb(var(--muted-fg))]'}`}>
+            Active
+          </button>
+          <button onClick={() => { setScheduleView('archived'); setScheduleFilter(null) }}
+            className={`px-3 py-1.5 text-xs font-bold transition-colors ${scheduleView === 'archived' ? 'bg-blue-600 text-white' : 'bg-[rgb(var(--bg))] text-[rgb(var(--muted-fg))]'}`}>
+            Archived
+          </button>
+        </div>
+        <span className="text-[11px] text-[rgb(var(--muted-fg))]">
+          {scheduleView === 'archived'
+            ? 'Archived schedules are hidden from the public page; their registration history is kept.'
+            : 'Active and closed schedules.'}
+        </span>
+      </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
-        {schedules.map((s) => (
+        {schedules
+          .filter((s) => scheduleView === 'archived' ? s.status === 'archived' : s.status !== 'archived')
+          .map((s) => (
           <div key={s.id} className={`p-4 rounded-xl border ${scheduleFilter === s.id ? 'border-blue-500 bg-blue-500/5' : 'border-[rgb(var(--border-soft))]'}`}>
             <div className="flex items-start justify-between gap-2">
               <button onClick={() => setScheduleFilter(scheduleFilter === s.id ? null : s.id)} className="text-left flex-1">
@@ -220,7 +256,11 @@ function AdminRegistrationsPage() {
               </button>
               <div className="flex flex-col gap-1">
                 <button onClick={() => { setEditingSchedule(s); setShowScheduleEditor(true) }} className="text-[10px] text-blue-500 hover:underline">Edit</button>
-                <button onClick={() => handleDeleteSchedule(s.id)} className="text-[10px] text-red-500 hover:underline">Delete</button>
+                {s.status === 'archived' ? (
+                  <button onClick={() => handleRestoreSchedule(s.id)} className="text-[10px] text-green-500 hover:underline">Restore</button>
+                ) : (
+                  <button onClick={() => handleDeleteSchedule(s.id)} className="text-[10px] text-red-500 hover:underline">Archive</button>
+                )}
               </div>
             </div>
           </div>
