@@ -138,6 +138,21 @@ function RegistrationPage() {
       setResult({ waitlisted: res.waitlisted })
     } catch (err: any) {
       setError(err?.message || 'Something went wrong. Please try again.')
+      // If the chosen schedule is gone (e.g. deleted since the page loaded),
+      // refresh the list and drop the stale selection so the user can pick again
+      // rather than repeatedly hitting the same dead schedule.
+      const msg = String(err?.message ?? '')
+      if (msg.includes('no longer available') || msg.includes('foreign key') || msg.includes('23503')) {
+        try {
+          const fresh = await getActiveRegistrationSchedules()
+          setSchedules(fresh)
+          if (selected && !fresh.some((x) => x.id === selected.id)) {
+            setSelected(null)
+          }
+        } catch {
+          /* leave the error message in place if refresh also fails */
+        }
+      }
     }
     setSubmitting(false)
   }
