@@ -147,29 +147,29 @@ function AdminRegistrationsPage() {
       return [{
         regId: r.id, scheduleName: r.scheduleName ?? '', groupName: null as string | null,
         name: r.name ?? '', position: r.position ?? '', status: r.status,
-        contact: r.email || r.contactNumber || '',
+        contact: r.email || r.contactNumber || r.facebookUrl || '',
       }]
     }
     if (r.roster.length === 0) {
       return [{
         regId: r.id, scheduleName: r.scheduleName ?? '', groupName: r.teamName,
-        name: '(no roster members listed)', position: '', status: r.status, contact: r.email || r.contactNumber || '',
+        name: '(no roster members listed)', position: '', status: r.status, contact: r.email || r.contactNumber || r.facebookUrl || '',
       }]
     }
     return r.roster.map((m) => ({
       regId: r.id, scheduleName: r.scheduleName ?? '', groupName: r.teamName,
-      name: m.name, position: m.position, status: r.status, contact: r.email || r.contactNumber || '',
+      name: m.name, position: m.position, status: r.status, contact: r.email || r.contactNumber || r.facebookUrl || '',
     }))
   })
 
   const exportCSV = () => {
-    const headers = ['ID', 'Schedule', 'Type', 'Name/Team', 'Position', 'Roster', 'Contact', 'Email', 'Status', 'Registered']
+    const headers = ['ID', 'Schedule', 'Type', 'Name/Team', 'Position', 'Roster', 'Contact', 'Email', 'Facebook', 'Status', 'Registered']
     const rows = registrations.map((r) => [
       r.id, r.scheduleName ?? '', r.regType,
       r.regType === 'individual' ? (r.name ?? '') : (r.teamName ?? ''),
       r.position ?? '',
       r.roster.map((m) => `${m.name}${m.position ? ` (${m.position})` : ''}`).join(' | '),
-      r.contactNumber ?? '', r.email ?? '', r.status,
+      r.contactNumber ?? '', r.email ?? '', r.facebookUrl ?? '', r.status,
       new Date(r.createdAt).toLocaleString(),
     ])
     const csv = [headers, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
@@ -323,7 +323,7 @@ function AdminRegistrationsPage() {
                       <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500">{r.position}</span>
                     )}
                   </p>
-                  <p className="text-xs text-[rgb(var(--muted-fg))]">{r.scheduleName} • {r.email || r.contactNumber || 'No contact'}</p>
+                  <p className="text-xs text-[rgb(var(--muted-fg))]">{r.scheduleName} • {r.email || r.contactNumber || r.facebookUrl || 'No contact'}</p>
                   {r.roster.length > 0 && (
                     <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-1">
                       Roster: {r.roster.map((m) => `${m.name}${m.position ? ` (${m.position})` : ''}`).join(', ')}
