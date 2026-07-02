@@ -54,6 +54,7 @@ export interface Registration {
   roster: RosterMember[]    // for team/group registrations, position per member
   contactNumber: string | null
   email: string | null
+  facebookUrl: string | null
   customAnswers: Record<string, any>
   status: 'pending' | 'confirmed' | 'cancelled' | 'waitlisted'
   createdAt: string
@@ -91,6 +92,7 @@ function mapRegistration(r: any): Registration {
     roster: r.roster ?? [],
     contactNumber: r.contact_number,
     email: r.email,
+    facebookUrl: r.facebook_url,
     customAnswers: r.custom_answers ?? {},
     status: r.status,
     createdAt: r.created_at,
@@ -199,7 +201,7 @@ export const submitRegistration = createServerFn({ method: 'POST' })
   .inputValidator((data: {
     scheduleId: number; regType: 'individual' | 'team' | 'group'
     name: string; position: string; teamName: string; roster: RosterMember[]
-    contactNumber: string; email: string; customAnswers: Record<string, any>
+    contactNumber: string; email: string; facebookUrl: string; customAnswers: Record<string, any>
   }) => data)
   .handler(async ({ data }) => {
     // Optional identity — registration works for guests, but we tag the member if logged in.
@@ -223,10 +225,10 @@ export const submitRegistration = createServerFn({ method: 'POST' })
 
       const rows = await db.execute(sql`
         INSERT INTO registrations
-          (schedule_id, reg_type, name, position, team_name, roster, contact_number, email, custom_answers, status, netlify_user_id)
+          (schedule_id, reg_type, name, position, team_name, roster, contact_number, email, facebook_url, custom_answers, status, netlify_user_id)
         VALUES (
           ${data.scheduleId}, ${data.regType}, ${data.name || null}, ${data.position || null}, ${data.teamName || null},
-          ${JSON.stringify(data.roster ?? [])}::jsonb, ${data.contactNumber}, ${data.email},
+          ${JSON.stringify(data.roster ?? [])}::jsonb, ${data.contactNumber || null}, ${data.email || null}, ${data.facebookUrl || null},
           ${JSON.stringify(data.customAnswers ?? {})}::jsonb, ${initialStatus}, ${identity?.userId ?? null}
         )
         RETURNING *
