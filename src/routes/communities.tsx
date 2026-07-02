@@ -28,6 +28,8 @@ type Community = {
   slug: string
   name: string
   description: string
+  colorPrimary: string
+  colorSecondary: string
   memberCount: number
   scheduleCount: number
   isMember: boolean
@@ -279,6 +281,8 @@ function CommunityFormModal({
   const [slug, setSlug] = useState(existing?.slug ?? '')
   const [slugTouched, setSlugTouched] = useState(!!existing)
   const [description, setDescription] = useState(existing?.description ?? '')
+  const [colorPrimary, setColorPrimary] = useState(existing?.colorPrimary ?? '#1e3a8a')
+  const [colorSecondary, setColorSecondary] = useState(existing?.colorSecondary ?? '#ffffff')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -298,9 +302,9 @@ function CommunityFormModal({
     setSubmitting(true)
     try {
       if (existing) {
-        await updateCommunity({ data: { id: existing.id, name: name.trim(), slug: finalSlug, description: description.trim() } })
+        await updateCommunity({ data: { id: existing.id, name: name.trim(), slug: finalSlug, description: description.trim(), colorPrimary, colorSecondary } })
       } else {
-        await createCommunity({ data: { name: name.trim(), slug: finalSlug, description: description.trim() } })
+        await createCommunity({ data: { name: name.trim(), slug: finalSlug, description: description.trim(), colorPrimary, colorSecondary } })
       }
       onSaved()
     } catch (e: any) {
@@ -347,6 +351,26 @@ function CommunityFormModal({
               placeholder="A short description of this community."
               className="w-full bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] focus:border-blue-500 outline-none rounded-xl px-3 py-2.5 text-sm resize-none"
             />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[rgb(var(--muted-fg))] mb-1 block">Community Colors (2-way palette)</label>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-xs">
+                <input type="color" value={colorPrimary} onChange={(e) => setColorPrimary(e.target.value)}
+                  className="w-9 h-9 rounded-lg border border-[rgb(var(--border-soft))] cursor-pointer" />
+                Primary
+              </label>
+              <label className="flex items-center gap-2 text-xs">
+                <input type="color" value={colorSecondary} onChange={(e) => setColorSecondary(e.target.value)}
+                  className="w-9 h-9 rounded-lg border border-[rgb(var(--border-soft))] cursor-pointer" />
+                Secondary
+              </label>
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full ml-auto"
+                style={{ backgroundColor: colorPrimary, color: colorSecondary }}>
+                {name.trim() || 'Preview'}
+              </span>
+            </div>
+            <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1">Primary = tag background, Secondary = tag text. Used everywhere this community appears.</p>
           </div>
           {error && (
             <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-sm text-red-400">{error}</div>
