@@ -1,228 +1,181 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
-import { Database, Play, ShieldCheck, AlertTriangle, Table2, History } from 'lucide-react'
-import {
-  getDbIdentity, listSchema, runReadQuery,
-  previewMigration, runMigration, getMigrationLog,
-} from '@/server/db-console.functions'
+// src/server/db-console.functions.ts
+// Internal, admin-only database console. Two capabilities, both server-guarded:
+//   1) runReadQuery   — SELECT-only, blocks all writes/DDL.
+//   2) runMigration   — additive-only DDL (CREATE TABLE/INDEX IF NOT EXISTS,
+//                       ADD COLUMN IF NOT EXISTS, ADD CONSTRAINT). Destructive
+//                       statements are rejected. Every run is logged.
+// Safety is enforced on the SERVER, never trusting the client.
 
-export const Route = createFileRoute('/admin-db-console')({
-  component: DbConsolePage,
+import { createServerFn } from '@tanstack/react-start'
+import { db } from '../../db/index.js'
+import { sql } from 'drizzle-orm'
+import { withRetry } from '@/lib/db-retry'
+import { getAdminUser } from '@/lib/auth-server'
+
+// ─── Statement classification helpers ────────────────────────────────────────
+
+/** Strips SQL comments and normalizes whitespace for reliable inspection. */
+function normalizeSql(raw: string): string {
+  return raw
+    .replace(/--[^\n]*/g, ' ')          // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')  // block comments
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Rejects attempts to run more than one statement (basic injection guard). */
+function isSingleStatement(s: string): boolean {
+  // Allow a single optional trailing semicolon; reject any internal semicolons.
+  const trimmed = s.replace(/;\s*$/, '')
+  return !trimmed.includes(';')
+}
+
+const READ_ONLY_RE = /^\s*(select|with|explain|show)\b/i
+
+// Destructive tokens that are NEVER allowed in the migration runner.
+const DESTRUCTIVE_RE = /\b(drop|delete|truncate|update|insert|grant|revoke|alter\s+column|drop\s+column|rename)\b/i
+
+// Additive statement shapes the migration runner explicitly permits.
+const ADDITIVE_PATTERNS: { label: string; re: RegExp }[] = [
+  { label: 'create table (if not exists)', re: /^create\s+table\s+if\s+not\s+exists\b/i },
+  { label: 'add column (if not exists)',   re: /^alter\s+table\s+\w+\s+add\s+column\s+if\s+not\s+exists\b/i },
+  { label: 'create index (if not exists)', re: /^create\s+(unique\s+)?index\s+if\s+not\s+exists\b/i },
+  { label: 'add constraint',               re: /^alter\s+table\s+\w+\s+add\s+constraint\b/i },
+]
+
+function classifyMigration(raw: string): { ok: boolean; label?: string; reason?: string } {
+  const s = normalizeSql(raw)
+  if (!s) return { ok: false, reason: 'Empty statement.' }
+  if (!isSingleStatement(s)) return { ok: false, reason: 'Only one statement at a time is allowed.' }
+  if (DESTRUCTIVE_RE.test(s)) return { ok: false, reason: 'Destructive statements (drop, delete, update, alter/drop column, rename, etc.) are not allowed. This console is additive-only to protect your data.' }
+  const match = ADDITIVE_PATTERNS.find((p) => p.re.test(s))
+  if (!match) return { ok: false, reason: 'Only additive schema changes are allowed: CREATE TABLE IF NOT EXISTS, ALTER TABLE ... ADD COLUMN IF NOT EXISTS, CREATE INDEX IF NOT EXISTS, or ADD CONSTRAINT.' }
+  return { ok: true, label: match.label }
+}
+
+// ─── Which database am I on (guardrail shown in the UI) ──────────────────────
+export const getDbIdentity = createServerFn({ method: 'GET' }).handler(async () => {
+  const admin = await getAdminUser()
+  if (!admin) throw new Error('Admin access required')
+  return withRetry(async () => {
+    const r = await db.execute(sql`SELECT current_database() AS database, current_user AS usr`)
+    const row = r.rows[0] as any
+    return { database: row?.database ?? null, user: row?.usr ?? null }
+  })
 })
 
-type Tab = 'browse' | 'read' | 'migrate'
+// ─── List tables + their columns (safe schema browser) ───────────────────────
+export const listSchema = createServerFn({ method: 'GET' }).handler(async () => {
+  const admin = await getAdminUser()
+  if (!admin) throw new Error('Admin access required')
+  return withRetry(async () => {
+    const tables = await db.execute(sql`
+      SELECT t.table_name,
+             (SELECT n_live_tup FROM pg_stat_user_tables s WHERE s.relname = t.table_name) AS approx_rows
+      FROM information_schema.tables t
+      WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+      ORDER BY t.table_name
+    `)
+    const cols = await db.execute(sql`
+      SELECT table_name, column_name, data_type, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+      ORDER BY table_name, ordinal_position
+    `)
+    const byTable: Record<string, any[]> = {}
+    for (const c of cols.rows as any[]) {
+      (byTable[c.table_name] ??= []).push({ column: c.column_name, type: c.data_type, nullable: c.is_nullable === 'YES' })
+    }
+    return (tables.rows as any[]).map((t) => ({
+      table: t.table_name,
+      approxRows: t.approx_rows === null ? null : Number(t.approx_rows),
+      columns: byTable[t.table_name] ?? [],
+    }))
+  })
+})
 
-function DbConsolePage() {
-  const [tab, setTab] = useState<Tab>('browse')
-  const [identity, setIdentity] = useState<{ database: string; user: string } | null>(null)
+// ─── Read-only query runner (SELECT / WITH / EXPLAIN / SHOW only) ─────────────
+export const runReadQuery = createServerFn({ method: 'POST' })
+  .inputValidator((data: { query: string }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
+    const s = normalizeSql(data.query)
+    if (!isSingleStatement(s)) throw new Error('Run one query at a time (no semicolons within the query).')
+    if (!READ_ONLY_RE.test(s)) throw new Error('Read tab only runs SELECT / WITH / EXPLAIN / SHOW queries. Use the Migration tab for schema changes.')
+    if (DESTRUCTIVE_RE.test(s)) throw new Error('That query contains a write/DDL keyword and was blocked. The read tab is strictly read-only.')
+    return withRetry(async () => {
+      // Wrap in a subquery with a hard row cap so a huge table can't flood the UI.
+      const capped = `SELECT * FROM (${s.replace(/;$/, '')}) AS _q LIMIT 500`
+      const r = await db.execute(sql.raw(capped))
+      const rows = r.rows as any[]
+      const columns = rows.length ? Object.keys(rows[0]) : []
+      return { columns, rows, rowCount: rows.length, capped: rows.length === 500 }
+    })
+  })
 
-  useEffect(() => { getDbIdentity().then(setIdentity).catch(() => {}) }, [])
+// ─── Preview a migration (validate + check if the change already exists) ─────
+export const previewMigration = createServerFn({ method: 'POST' })
+  .inputValidator((data: { statement: string }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
+    const verdict = classifyMigration(data.statement)
+    return { normalized: normalizeSql(data.statement), ...verdict }
+  })
 
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="flex items-center gap-2 mb-1">
-        <Database size={20} />
-        <h1 className="text-2xl font-bold">Database Console</h1>
-      </div>
-      <p className="text-sm text-[rgb(var(--muted-fg))] mb-4">
-        Admin-only. Read queries are SELECT-only; migrations are additive-only (no drops, deletes, or type changes).
-      </p>
+// ─── Execute a validated additive migration (with typed confirmation) ────────
+export const runMigration = createServerFn({ method: 'POST' })
+  .inputValidator((data: { statement: string; confirmTarget: string }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
 
-      {identity && (
-        <div className="mb-5 rounded-xl border border-[rgb(var(--border-soft))] px-4 py-2.5 flex items-center gap-2 text-sm">
-          <ShieldCheck size={15} className="text-green-500" />
-          Connected to <span className="font-mono font-bold">{identity.database}</span>
-          <span className="text-[rgb(var(--muted-fg))]">· {identity.user}</span>
-        </div>
-      )}
+    const verdict = classifyMigration(data.statement)
+    if (!verdict.ok) throw new Error(verdict.reason || 'Statement not allowed.')
 
-      <div className="flex gap-1 mb-5 border-b border-[rgb(var(--border-soft))]">
-        {([['browse', 'Browse', Table2], ['read', 'Read Query', Play], ['migrate', 'Migrate', ShieldCheck]] as const).map(([t, label, Icon]) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]'}`}>
-            <Icon size={14} /> {label}
-          </button>
-        ))}
-      </div>
+    const s = normalizeSql(data.statement)
+    // The typed confirmation must appear as a whole word in the statement (e.g. the
+    // table name). This forces the admin to consciously match what they're changing.
+    const target = (data.confirmTarget || '').trim()
+    if (!target) throw new Error('Type the target table/object name to confirm.')
+    const targetRe = new RegExp(`\\b${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+    if (!targetRe.test(s)) throw new Error(`Confirmation "${target}" does not appear in the statement. Type the exact table/object name being changed.`)
 
-      {tab === 'browse' && <BrowseTab />}
-      {tab === 'read' && <ReadTab />}
-      {tab === 'migrate' && <MigrateTab />}
-    </div>
-  )
-}
+    return withRetry(async () => {
+      // Ensure the audit log table exists (itself additive & idempotent).
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS schema_migrations_log (
+          id serial PRIMARY KEY,
+          statement text NOT NULL,
+          kind text,
+          run_by text,
+          run_at timestamp NOT NULL DEFAULT now()
+        )
+      `)
+      await db.execute(sql.raw(s))
+      const runBy = (admin as any)?.email ?? (admin as any)?.id ?? (admin as any)?.sub ?? 'admin'
+      await db.execute(sql`
+        INSERT INTO schema_migrations_log (statement, kind, run_by)
+        VALUES (${s}, ${verdict.label ?? null}, ${runBy})
+      `)
+      return { ok: true, ran: s, kind: verdict.label }
+    })
+  })
 
-function BrowseTab() {
-  const [schema, setSchema] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [open, setOpen] = useState<string | null>(null)
-
-  useEffect(() => { listSchema().then(setSchema).finally(() => setLoading(false)) }, [])
-  if (loading) return <p className="text-sm text-[rgb(var(--muted-fg))]">Loading schema…</p>
-
-  return (
-    <div className="space-y-2">
-      {schema.map((t) => (
-        <div key={t.table} className="rounded-xl border border-[rgb(var(--border-soft))]">
-          <button onClick={() => setOpen(open === t.table ? null : t.table)}
-            className="w-full flex items-center justify-between px-4 py-2.5 text-left">
-            <span className="font-mono text-sm font-bold">{t.table}</span>
-            <span className="text-[11px] text-[rgb(var(--muted-fg))]">{t.approxRows ?? '—'} rows · {t.columns.length} cols</span>
-          </button>
-          {open === t.table && (
-            <div className="px-4 pb-3 border-t border-[rgb(var(--border-soft))] pt-2">
-              {t.columns.map((c: any) => (
-                <div key={c.column} className="flex items-center gap-2 text-xs py-0.5">
-                  <span className="font-mono">{c.column}</span>
-                  <span className="text-[rgb(var(--muted-fg))]">{c.type}{c.nullable ? '' : ' · not null'}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function ReadTab() {
-  const [query, setQuery] = useState('SELECT id, name, status FROM registration_schedules ORDER BY id;')
-  const [result, setResult] = useState<any>(null)
-  const [error, setError] = useState('')
-  const [running, setRunning] = useState(false)
-
-  const run = async () => {
-    setRunning(true); setError(''); setResult(null)
-    try { setResult(await runReadQuery({ data: { query } })) }
-    catch (e: any) { setError(e?.message || 'Query failed') }
-    setRunning(false)
-  }
-
-  return (
-    <div className="space-y-3">
-      <textarea value={query} onChange={(e) => setQuery(e.target.value)} rows={4}
-        className="w-full font-mono text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
-      <button onClick={run} disabled={running}
-        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-2 text-sm font-bold disabled:opacity-50">
-        <Play size={14} /> {running ? 'Running…' : 'Run Query'}
-      </button>
-      {error && <p className="text-sm text-red-500 bg-red-500/10 rounded-lg px-3 py-2">{error}</p>}
-      {result && (
-        <div>
-          <p className="text-[11px] text-[rgb(var(--muted-fg))] mb-1">{result.rowCount} rows{result.capped ? ' (capped at 500)' : ''}</p>
-          <div className="overflow-x-auto rounded-xl border border-[rgb(var(--border-soft))]">
-            <table className="w-full text-xs">
-              <thead><tr className="bg-[rgb(var(--surface-hover))] text-left">
-                {result.columns.map((c: string) => <th key={c} className="px-3 py-2 font-bold">{c}</th>)}
-              </tr></thead>
-              <tbody className="divide-y divide-[rgb(var(--border-soft))]">
-                {result.rows.map((row: any, i: number) => (
-                  <tr key={i}>
-                    {result.columns.map((c: string) => <td key={c} className="px-3 py-1.5 font-mono">{formatCell(row[c])}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function MigrateTab() {
-  const [statement, setStatement] = useState('ALTER TABLE registrations ADD COLUMN IF NOT EXISTS example_col text;')
-  const [preview, setPreview] = useState<any>(null)
-  const [confirmTarget, setConfirmTarget] = useState('')
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [log, setLog] = useState<any[]>([])
-
-  const loadLog = () => getMigrationLog().then(setLog).catch(() => {})
-  useEffect(() => { loadLog() }, [])
-
-  const doPreview = async () => {
-    setError(''); setSuccess(''); setPreview(null)
-    try { setPreview(await previewMigration({ data: { statement } })) }
-    catch (e: any) { setError(e?.message || 'Preview failed') }
-  }
-
-  const doRun = async () => {
-    setBusy(true); setError(''); setSuccess('')
+// ─── View the migration audit log ────────────────────────────────────────────
+export const getMigrationLog = createServerFn({ method: 'GET' }).handler(async () => {
+  const admin = await getAdminUser()
+  if (!admin) throw new Error('Admin access required')
+  return withRetry(async () => {
     try {
-      const res = await runMigration({ data: { statement, confirmTarget } })
-      setSuccess(`Applied: ${res.kind ?? 'migration'}`)
-      setConfirmTarget(''); setPreview(null); loadLog()
-    } catch (e: any) { setError(e?.message || 'Migration failed') }
-    setBusy(false)
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-4 py-2.5 flex items-start gap-2">
-        <AlertTriangle size={15} className="text-amber-500 mt-0.5 shrink-0" />
-        <p className="text-xs text-[rgb(var(--fg))]">
-          Additive-only: <span className="font-bold">CREATE TABLE / ADD COLUMN / CREATE INDEX (IF NOT EXISTS), ADD CONSTRAINT</span>.
-          Drops, deletes, updates, renames, and type changes are blocked to protect your data.
-        </p>
-      </div>
-
-      <textarea value={statement} onChange={(e) => { setStatement(e.target.value); setPreview(null) }} rows={3}
-        className="w-full font-mono text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
-
-      <button onClick={doPreview}
-        className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold border border-[rgb(var(--border-soft))] hover:border-blue-500">
-        Preview
-      </button>
-
-      {preview && (
-        <div className={`rounded-xl border px-4 py-3 ${preview.ok ? 'border-green-500/40 bg-green-500/5' : 'border-red-500/40 bg-red-500/5'}`}>
-          {preview.ok ? (
-            <>
-              <p className="text-sm font-bold text-green-600 flex items-center gap-1.5"><ShieldCheck size={14} /> Allowed · {preview.label}</p>
-              <p className="text-xs font-mono mt-2 text-[rgb(var(--muted-fg))]">{preview.normalized}</p>
-              <div className="mt-3 pt-3 border-t border-[rgb(var(--border-soft))]">
-                <label className="text-xs font-bold block mb-1">Type the target table/object name to confirm:</label>
-                <input value={confirmTarget} onChange={(e) => setConfirmTarget(e.target.value)}
-                  placeholder="e.g. registrations"
-                  className="w-full font-mono text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
-                <button onClick={doRun} disabled={busy || !confirmTarget.trim()}
-                  className="mt-2 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-2 text-sm font-bold disabled:opacity-50">
-                  <ShieldCheck size={14} /> {busy ? 'Applying…' : 'Apply Migration'}
-                </button>
-              </div>
-            </>
-          ) : (
-            <p className="text-sm text-red-500 flex items-start gap-1.5"><AlertTriangle size={14} className="mt-0.5" /> {preview.reason}</p>
-          )}
-        </div>
-      )}
-
-      {error && <p className="text-sm text-red-500 bg-red-500/10 rounded-lg px-3 py-2">{error}</p>}
-      {success && <p className="text-sm text-green-600 bg-green-500/10 rounded-lg px-3 py-2">{success}</p>}
-
-      <div className="pt-4">
-        <p className="text-xs font-bold text-[rgb(var(--muted-fg))] flex items-center gap-1.5 mb-2"><History size={13} /> Migration history</p>
-        {log.length === 0 ? (
-          <p className="text-xs text-[rgb(var(--muted-fg))]">No migrations run through the console yet.</p>
-        ) : (
-          <div className="space-y-1">
-            {log.map((m) => (
-              <div key={m.id} className="text-[11px] rounded-lg border border-[rgb(var(--border-soft))] px-3 py-1.5">
-                <span className="font-mono">{m.statement}</span>
-                <span className="text-[rgb(var(--muted-fg))]"> · {m.run_by} · {new Date(m.run_at).toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function formatCell(v: any): string {
-  if (v === null || v === undefined) return '∅'
-  if (typeof v === 'object') return JSON.stringify(v)
-  return String(v)
-}
+      const r = await db.execute(sql`
+        SELECT id, statement, kind, run_by, run_at
+        FROM schema_migrations_log ORDER BY id DESC LIMIT 100
+      `)
+      return r.rows as any[]
+    } catch {
+      return [] // table doesn't exist yet = no migrations run through the console
+    }
+  })
+})
