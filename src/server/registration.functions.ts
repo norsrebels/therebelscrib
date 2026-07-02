@@ -217,7 +217,7 @@ export const submitRegistration = createServerFn({ method: 'POST' })
         GROUP BY s.id
       `)
       const sched = schedRows.rows[0] as any
-      if (!sched) throw new Error('Schedule not found')
+      if (!sched) throw new Error('This schedule is no longer available — it may have been removed. Please refresh the page and pick an open schedule.')
       if (sched.status !== 'active') throw new Error('Registration is closed for this schedule')
 
       const isFull = sched.capacity !== null && Number(sched.registration_count) >= Number(sched.capacity)
