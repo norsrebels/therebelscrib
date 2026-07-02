@@ -185,13 +185,21 @@ export const updateRegistrationSchedule = createServerFn({ method: 'POST' })
   })
 
 // ─── Admin: delete a schedule (cascades to its registrations) ──────────────────
+// Archives a schedule (soft-delete) instead of removing the row. Hard-deleting
+// would cascade-delete every registration attached to it — permanently losing the
+// signup history for that event. Archiving preserves all that data while hiding the
+// schedule from the public form and the active admin views.
 export const deleteRegistrationSchedule = createServerFn({ method: 'POST' })
   .inputValidator((data: { id: number }) => data)
   .handler(async ({ data }) => {
     const admin = await getAdminUser()
     if (!admin) throw new Error('Admin access required')
     return withRetry(async () => {
-      await db.execute(sql`DELETE FROM registration_schedules WHERE id = ${data.id}`)
+      await db.execute(sql`
+        UPDATE registration_schedules
+        SET status = 'archived', updated_at = now()
+        WHERE id = ${data.id}
+      `)
       return { ok: true }
     })
   })
@@ -208,7 +216,7 @@ export const submitRegistration = createServerFn({ method: 'POST' })
     const identity = await getStatIdentity().catch(() => null)
 
     return withRetry(async () => {
-      // Check the schedule is still active and not over capacity before accepting.
+      // Read the schedule for capacity/status info and a friendly pre-check.
       const schedRows = await db.execute(sql`
         SELECT s.*, COALESCE(SUM(CASE WHEN r.id IS NULL THEN 0 WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END), 0)::int AS registration_count
         FROM registration_schedules s
@@ -223,16 +231,25 @@ export const submitRegistration = createServerFn({ method: 'POST' })
       const isFull = sched.capacity !== null && Number(sched.registration_count) >= Number(sched.capacity)
       const initialStatus = isFull ? 'waitlisted' : 'pending'
 
+      // Insert atomically: the row is only created if the schedule still exists at
+      // write time (INSERT ... SELECT ... WHERE EXISTS). This does the existence
+      // check and the insert in ONE statement on ONE connection, so a stale or
+      // just-deleted schedule can't slip through as a raw foreign-key error —
+      // instead we detect zero rows inserted and return a clean message.
       const rows = await db.execute(sql`
         INSERT INTO registrations
           (schedule_id, reg_type, name, position, team_name, roster, contact_number, email, facebook_url, custom_answers, status, netlify_user_id)
-        VALUES (
+        SELECT
           ${data.scheduleId}, ${data.regType}, ${data.name || null}, ${data.position || null}, ${data.teamName || null},
           ${JSON.stringify(data.roster ?? [])}::jsonb, ${data.contactNumber || null}, ${data.email || null}, ${data.facebookUrl || null},
           ${JSON.stringify(data.customAnswers ?? {})}::jsonb, ${initialStatus}, ${identity?.userId ?? null}
-        )
+        WHERE EXISTS (SELECT 1 FROM registration_schedules WHERE id = ${data.scheduleId})
         RETURNING *
       `)
+
+      if (!rows.rows[0]) {
+        throw new Error('This schedule is no longer available — it may have been removed. Please refresh the page and pick an open schedule.')
+      }
       return { registration: mapRegistration(rows.rows[0]), waitlisted: isFull }
     })
   })
