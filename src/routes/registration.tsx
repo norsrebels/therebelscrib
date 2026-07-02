@@ -64,6 +64,7 @@ function RegistrationPage() {
   ])
   const [contactNumber, setContactNumber] = useState('')
   const [email, setEmail] = useState('')
+  const [facebookUrl, setFacebookUrl] = useState('')
   const [customAnswers, setCustomAnswers] = useState<Record<string, any>>({})
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ waitlisted: boolean } | null>(null)
@@ -130,6 +131,7 @@ function RegistrationPage() {
           roster: regType === 'individual' ? [] : roster.filter((r) => r.name.trim()),
           contactNumber,
           email,
+          facebookUrl,
           customAnswers,
         },
       })
@@ -274,15 +276,29 @@ function RegistrationPage() {
             </>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Contact Number</label>
-              <input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)}
-                className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2.5 focus:outline-none focus:border-blue-500" />
+          <div className="pt-2 border-t border-[rgb(var(--border-soft))]">
+            <p className="text-xs font-bold text-[rgb(var(--fg))] mb-2">Contact Details</p>
+            <p className="text-[11px] text-[rgb(var(--muted-fg))] mb-3">
+              Please provide at least one way to reach you (contact number, email, or Facebook).
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Contact Number <span className="font-normal opacity-70">(optional)</span></label>
+                <input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)}
+                  inputMode="tel"
+                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2.5 focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Email <span className="font-normal opacity-70">(optional)</span></label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2.5 focus:outline-none focus:border-blue-500" />
+              </div>
             </div>
-            <div>
-              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            <div className="mt-3">
+              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Facebook Profile URL <span className="font-normal opacity-70">(optional)</span></label>
+              <input type="url" value={facebookUrl} onChange={(e) => setFacebookUrl(e.target.value)}
+                placeholder="https://facebook.com/your.profile"
+                inputMode="url"
                 className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2.5 focus:outline-none focus:border-blue-500" />
             </div>
           </div>
@@ -321,6 +337,16 @@ function RegistrationPage() {
           )}
 
           {error && <p className="text-sm text-red-500">{error}</p>}
+
+          <div className="rounded-xl bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] px-4 py-3">
+            <p className="text-[11px] leading-relaxed text-[rgb(var(--muted-fg))]">
+              <span className="font-bold text-[rgb(var(--fg))]">Data Privacy Notice.</span>{' '}
+              The information you provide is collected solely to process and manage your registration
+              for this event within the Rebels Volleyball Club registration database. It will not be
+              sold, shared with third parties, or used for any purpose beyond club registration and
+              event coordination. By submitting, you consent to this use of your details.
+            </p>
+          </div>
 
           <button type="submit" disabled={submitting}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-sm font-bold transition-colors disabled:opacity-50">
