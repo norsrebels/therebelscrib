@@ -6,7 +6,8 @@ import {
   type RegistrationSchedule,
   type RosterMember,
 } from '@/server/registration.functions'
-import { Calendar, MapPin, Users, User, UsersRound, Check, AlertTriangle, ChevronDown } from 'lucide-react'
+import { getActiveSchedulesWithCommunities } from '@/server/community.functions'
+import { Calendar, MapPin, Users, User, UsersRound, Check, AlertTriangle, ChevronDown, Tag } from 'lucide-react'
 
 export const Route = createFileRoute('/registration')({
   component: RegistrationPage,
@@ -51,6 +52,8 @@ function formatScheduleWhen(date: string | null | undefined, time: string | null
 
 function RegistrationPage() {
   const [schedules, setSchedules] = useState<RegistrationSchedule[]>([])
+  const [scheduleCommunities, setScheduleCommunities] = useState<Record<number, any[]>>({})
+  const [communityFilter, setCommunityFilter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<RegistrationSchedule | null>(null)
 
@@ -74,6 +77,8 @@ function RegistrationPage() {
     getActiveRegistrationSchedules()
       .then((s) => {
         setSchedules(s)
+        // Load community tags in parallel; failure is non-fatal (tags just won't show).
+        getActiveSchedulesWithCommunities().then(setScheduleCommunities).catch(() => setScheduleCommunities({}))
         // Deep link: ?schedule=ID pre-selects that schedule (from a QR code).
         let preselectId: number | null = null
         if (typeof window !== 'undefined') {
@@ -192,9 +197,38 @@ function RegistrationPage() {
       <h1 className="text-2xl font-bold mb-1">Player Registration</h1>
       <p className="text-sm text-[rgb(var(--muted-fg))] mb-6">Pick a schedule and submit your details below.</p>
 
+      {/* Community filter — only shows if any schedule is tagged */}
+      {(() => {
+        const all = Object.values(scheduleCommunities).flat()
+        const uniq = Array.from(new Map(all.map((c: any) => [c.slug, c])).values())
+        if (uniq.length === 0) return null
+        return (
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <span className="text-xs font-bold text-[rgb(var(--muted-fg))] flex items-center gap-1"><Tag size={12} /> Filter:</span>
+            <button onClick={() => setCommunityFilter(null)}
+              className={`text-[11px] font-bold px-2.5 py-1 rounded-full border transition-colors ${communityFilter === null ? 'bg-blue-600 text-white border-blue-600' : 'border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>
+              All
+            </button>
+            {uniq.map((c: any) => (
+              <button key={c.slug} onClick={() => setCommunityFilter(c.slug)}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-full border transition-colors"
+                style={communityFilter === c.slug
+                  ? { backgroundColor: c.colorPrimary, color: c.colorSecondary, borderColor: c.colorPrimary }
+                  : { borderColor: c.colorPrimary, color: c.colorPrimary }}>
+                {c.name}
+              </button>
+            ))}
+          </div>
+        )
+      })()}
+
       {/* Schedule picker */}
       <div className="grid gap-3 mb-6">
-        {schedules.map((s) => (
+        {schedules
+          .filter((s) => !communityFilter || (scheduleCommunities[s.id] ?? []).some((c: any) => c.slug === communityFilter))
+          .map((s) => {
+          const tags = scheduleCommunities[s.id] ?? []
+          return (
           <button key={s.id} onClick={() => setSelected(s)}
             className={`text-left p-4 rounded-xl border transition-colors ${
               selected?.id === s.id ? 'border-blue-500 bg-blue-500/5' : 'border-[rgb(var(--border-soft))] hover:border-blue-500/40'
@@ -206,6 +240,16 @@ function RegistrationPage() {
                   <span className="flex items-center gap-1"><Calendar size={12} /> {formatScheduleWhen(s.date, s.startTime)}</span>
                   {s.venue && <span className="flex items-center gap-1"><MapPin size={12} /> {s.venue}</span>}
                 </div>
+                {tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {tags.map((c: any) => (
+                      <span key={c.slug} className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: c.colorPrimary, color: c.colorSecondary }}>
+                        {c.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               {s.capacity !== null && (
                 <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))] shrink-0">
@@ -214,7 +258,8 @@ function RegistrationPage() {
               )}
             </div>
           </button>
-        ))}
+          )
+        })}
       </div>
 
       {selected && (
