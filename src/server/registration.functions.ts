@@ -348,3 +348,33 @@ export const getRegistrationsHeartbeat = createServerFn({ method: 'GET' })
       return { count: Number(row?.count ?? 0), latest: row?.latest ?? null }
     })
   })
+
+// ─── Admin diagnostic: report what the APP's own DB connection actually sees ──────
+// This runs on the exact same connection as submitRegistration, so it answers
+// definitively: which database is the app writing to, and does it contain the
+// schedules the form is offering? Use this to catch environment/branch mismatches
+// where the app and a manual SQL editor point at different databases.
+export const getRegistrationDbDiagnostic = createServerFn({ method: 'GET' }).handler(async () => {
+  const admin = await getAdminUser()
+  if (!admin) throw new Error('Admin access required')
+  return withRetry(async () => {
+    const info = await db.execute(sql`SELECT current_database() AS database, current_user AS db_user`)
+    const counts = await db.execute(sql`
+      SELECT
+        (SELECT COUNT(*) FROM registration_schedules) AS schedules,
+        (SELECT COUNT(*) FROM registrations) AS registrations
+    `)
+    const schedules = await db.execute(sql`
+      SELECT id, name, status FROM registration_schedules ORDER BY id
+    `)
+    const c = counts.rows[0] as any
+    const i = info.rows[0] as any
+    return {
+      database: i?.database ?? null,
+      dbUser: i?.db_user ?? null,
+      scheduleCount: Number(c?.schedules ?? 0),
+      registrationCount: Number(c?.registrations ?? 0),
+      schedules: (schedules.rows as any[]).map((r) => ({ id: r.id, name: r.name, status: r.status })),
+    }
+  })
+})
