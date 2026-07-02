@@ -1,16 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { Database, Play, ShieldCheck, AlertTriangle, Table2, History } from 'lucide-react'
+import { Database, Play, ShieldCheck, AlertTriangle, Table2, History, Trash2 } from 'lucide-react'
 import {
   getDbIdentity, listSchema, runReadQuery,
   previewMigration, runMigration, getMigrationLog,
+  previewDestructive, runDestructive,
 } from '@/server/db-console.functions'
 
 export const Route = createFileRoute('/admin-db-console')({
   component: DbConsolePage,
 })
 
-type Tab = 'browse' | 'read' | 'migrate'
+type Tab = 'browse' | 'read' | 'migrate' | 'danger'
 
 function DbConsolePage() {
   const [tab, setTab] = useState<Tab>('browse')
@@ -37,7 +38,7 @@ function DbConsolePage() {
       )}
 
       <div className="flex gap-1 mb-5 border-b border-[rgb(var(--border-soft))]">
-        {([['browse', 'Browse', Table2], ['read', 'Read Query', Play], ['migrate', 'Migrate', ShieldCheck]] as const).map(([t, label, Icon]) => (
+        {([['browse', 'Browse', Table2], ['read', 'Read Query', Play], ['migrate', 'Migrate', ShieldCheck], ['danger', 'Danger', Trash2]] as const).map(([t, label, Icon]) => (
           <button key={t} onClick={() => setTab(t)}
             className={`flex items-center gap-1.5 px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]'}`}>
             <Icon size={14} /> {label}
@@ -48,6 +49,7 @@ function DbConsolePage() {
       {tab === 'browse' && <BrowseTab />}
       {tab === 'read' && <ReadTab />}
       {tab === 'migrate' && <MigrateTab />}
+      {tab === 'danger' && <DangerTab />}
     </div>
   )
 }
@@ -217,6 +219,100 @@ function MigrateTab() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function DangerTab() {
+  const [statement, setStatement] = useState('DELETE FROM registrations WHERE id = 0;')
+  const [preview, setPreview] = useState<any>(null)
+  const [password, setPassword] = useState('')
+  const [confirmTarget, setConfirmTarget] = useState('')
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const doPreview = async () => {
+    setError(''); setSuccess(''); setPreview(null)
+    try { setPreview(await previewDestructive({ data: { statement } })) }
+    catch (e: any) { setError(e?.message || 'Preview failed') }
+  }
+
+  const doRun = async () => {
+    setBusy(true); setError(''); setSuccess('')
+    try {
+      const res = await runDestructive({ data: { statement, password, confirmTarget } })
+      setSuccess(`Executed: ${res.kind}`)
+      setPassword(''); setConfirmTarget(''); setPreview(null)
+    } catch (e: any) { setError(e?.message || 'Execution failed') }
+    setBusy(false)
+  }
+
+  const wholeTable = preview?.ok && preview?.wholeTable
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl bg-red-500/10 border border-red-500/40 px-4 py-3 flex items-start gap-2">
+        <AlertTriangle size={16} className="text-red-500 mt-0.5 shrink-0" />
+        <div className="text-xs text-[rgb(var(--fg))]">
+          <p className="font-bold text-red-500 mb-0.5">Destructive zone — changes here can permanently delete data.</p>
+          <p>Every run requires your password. Whole-table operations require typing the table name. There is no undo. Preview the blast radius before running.</p>
+        </div>
+      </div>
+
+      <textarea value={statement} onChange={(e) => { setStatement(e.target.value); setPreview(null) }} rows={3}
+        className="w-full font-mono text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-red-500" />
+
+      <button onClick={doPreview}
+        className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold border border-[rgb(var(--border-soft))] hover:border-red-500">
+        Preview Blast Radius
+      </button>
+
+      {preview && (
+        <div className={`rounded-xl border px-4 py-3 ${preview.ok ? 'border-red-500/40 bg-red-500/5' : 'border-amber-500/40 bg-amber-500/5'}`}>
+          {preview.ok ? (
+            <>
+              <p className="text-sm font-bold flex items-center gap-1.5"><AlertTriangle size={14} className="text-red-500" /> {preview.kind}{preview.table ? ` · ${preview.table}` : ''}</p>
+              <p className="text-xs font-mono mt-2 text-[rgb(var(--muted-fg))]">{preview.normalized}</p>
+              {preview.affectedRows !== null && (
+                <p className="text-sm font-bold mt-2 text-red-500">
+                  This will affect approximately {preview.affectedRows} row{preview.affectedRows === 1 ? '' : 's'}.
+                </p>
+              )}
+              {wholeTable && (
+                <p className="text-xs font-bold mt-2 text-red-500 bg-red-500/10 rounded-lg px-3 py-2">
+                  ⚠ WHOLE-TABLE operation — affects the entire "{preview.table}" table. Type the table name below to confirm.
+                </p>
+              )}
+              <div className="mt-3 pt-3 border-t border-[rgb(var(--border-soft))] space-y-2">
+                {wholeTable && (
+                  <div>
+                    <label className="text-xs font-bold block mb-1">Type the table name to confirm whole-table {preview.kind}:</label>
+                    <input value={confirmTarget} onChange={(e) => setConfirmTarget(e.target.value)}
+                      placeholder={preview.table}
+                      className="w-full font-mono text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-red-500" />
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs font-bold block mb-1">Your admin password:</label>
+                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Re-enter your password"
+                    className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-red-500" />
+                </div>
+                <button onClick={doRun} disabled={busy || !password || (wholeTable && !confirmTarget.trim())}
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white rounded-xl px-4 py-2 text-sm font-bold disabled:opacity-50">
+                  <Trash2 size={14} /> {busy ? 'Executing…' : 'Run Destructive Statement'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-amber-600 flex items-start gap-1.5"><AlertTriangle size={14} className="mt-0.5" /> {preview.reason}</p>
+          )}
+        </div>
+      )}
+
+      {error && <p className="text-sm text-red-500 bg-red-500/10 rounded-lg px-3 py-2">{error}</p>}
+      {success && <p className="text-sm text-green-600 bg-green-500/10 rounded-lg px-3 py-2">{success}</p>}
     </div>
   )
 }
