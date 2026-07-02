@@ -13,6 +13,7 @@ import {
   type Registration,
   type CustomFieldDefinition,
 } from '@/server/registration.functions'
+import { getCommunities, getScheduleCommunities, setScheduleCommunities } from '@/server/community.functions'
 import {
   Calendar, Plus, Trash2, X, Check, Clock, AlertTriangle, Ban,
   Download, Search, ChevronDown, RefreshCw, Wifi,
@@ -413,8 +414,22 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
   const [status, setStatus] = useState(schedule?.status ?? 'active')
   const [capacity, setCapacity] = useState(schedule?.capacity?.toString() ?? '')
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>(schedule?.customFields ?? [])
+  const [allCommunities, setAllCommunities] = useState<{ id: number; name: string; colorPrimary: string; colorSecondary: string }[]>([])
+  const [selectedCommunityIds, setSelectedCommunityIds] = useState<number[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+
+  useEffect(() => {
+    getCommunities().then((cs: any[]) => setAllCommunities(cs.map((c) => ({ id: c.id, name: c.name, colorPrimary: c.colorPrimary, colorSecondary: c.colorSecondary })))).catch(() => {})
+    if (schedule) {
+      getScheduleCommunities({ data: { scheduleId: schedule.id } })
+        .then((cs: any[]) => setSelectedCommunityIds(cs.map((c) => c.id)))
+        .catch(() => {})
+    }
+  }, [schedule])
+
+  const toggleCommunity = (id: number) =>
+    setSelectedCommunityIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
 
   const addField = () => setCustomFields([...customFields, {
     id: 'cf_' + Math.random().toString(36).slice(2, 8), name: '', type: 'text', options: [], required: false, defaultValue: '',
@@ -438,8 +453,12 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
     try {
       if (schedule) {
         await updateRegistrationSchedule({ data: { ...payload, id: schedule.id } })
+        await setScheduleCommunities({ data: { scheduleId: schedule.id, communityIds: selectedCommunityIds } })
       } else {
-        await createRegistrationSchedule({ data: payload })
+        const created = await createRegistrationSchedule({ data: payload })
+        if (created?.id) {
+          await setScheduleCommunities({ data: { scheduleId: created.id, communityIds: selectedCommunityIds } })
+        }
       }
       onSaved()
     } catch (err: any) {
@@ -512,6 +531,27 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2}
               className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 resize-none focus:outline-none focus:border-blue-500" />
           </div>
+
+          {allCommunities.length > 0 && (
+            <div className="border-t border-[rgb(var(--border-soft))] pt-4">
+              <label className="text-xs font-bold text-[rgb(var(--fg))] block mb-2">Community Tags</label>
+              <p className="text-[11px] text-[rgb(var(--muted-fg))] mb-2">Tag this schedule so registrants can see and filter by community. A schedule can belong to several.</p>
+              <div className="flex flex-wrap gap-2">
+                {allCommunities.map((c) => {
+                  const on = selectedCommunityIds.includes(c.id)
+                  return (
+                    <button key={c.id} type="button" onClick={() => toggleCommunity(c.id)}
+                      className="text-[11px] font-bold px-2.5 py-1 rounded-full border transition-colors"
+                      style={on
+                        ? { backgroundColor: c.colorPrimary, color: c.colorSecondary, borderColor: c.colorPrimary }
+                        : { borderColor: c.colorPrimary, color: c.colorPrimary }}>
+                      {on ? '✓ ' : ''}{c.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="border-t border-[rgb(var(--border-soft))] pt-4">
             <div className="flex items-center justify-between mb-2">
