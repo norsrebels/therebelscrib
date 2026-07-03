@@ -9,6 +9,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { X, Download, Sparkles, Image as ImageIcon, Upload, Images, Trash2, Palette, Shuffle } from 'lucide-react'
 import { getGalleryImages, type GalleryImage } from '@/server/gallery.functions'
+import { getCardThemes, saveCardTheme, deleteCardTheme, type CardTheme } from '@/server/card-themes.functions'
 import { FONT_OPTIONS, loadFont, fontFamily, type FontChoice } from '@/lib/schedule-card-fonts'
 import { drawQrToCanvas, registrationUrl } from '@/lib/qrcode'
 
@@ -598,6 +599,7 @@ export function ScheduleCardGenerator({
   defaultDate,
   defaultStartTime,
   defaultEndTime,
+  communityColors,
   onClose,
 }: {
   scheduleName: string
@@ -605,6 +607,7 @@ export function ScheduleCardGenerator({
   defaultDate: string
   defaultStartTime: string
   defaultEndTime: string
+  communityColors?: { primary: string; secondary: string }[]
   onClose: () => void
 }) {
   const [template, setTemplate] = useState<Template>('bold')
@@ -624,13 +627,56 @@ export function ScheduleCardGenerator({
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([])
   const [loadingGallery, setLoadingGallery] = useState(false)
 
-  const [useCustomAccent, setUseCustomAccent] = useState(false)
-  const [customAccentHex, setCustomAccentHex] = useState('#0071e3')
+  // Pre-load from the schedule's community palette when it has tags.
+  // Primary community color drives the accent; secondary can drive text.
+  const communityPrimary = communityColors && communityColors.length > 0 ? communityColors[0].primary : null
+  const communitySecondary = communityColors && communityColors.length > 0 ? communityColors[0].secondary : null
+  const hasCommunityPalette = !!communityPrimary
+
+  const [useCustomAccent, setUseCustomAccent] = useState(hasCommunityPalette)
+  const [customAccentHex, setCustomAccentHex] = useState(communityPrimary ?? '#0071e3')
   const [font, setFont] = useState<FontChoice>('arial')
   const [fontLoading, setFontLoading] = useState(false)
   const [align, setAlign] = useState<Alignment>('center')
   const [textColorMode, setTextColorMode] = useState<'auto' | 'custom'>('auto')
   const [customTextHex, setCustomTextHex] = useState('#ffffff')
+
+  // Saved, reusable named themes (shared across admins via the DB).
+  const [savedThemes, setSavedThemes] = useState<CardTheme[]>([])
+  const [themeName, setThemeName] = useState('')
+  const [themeMsg, setThemeMsg] = useState('')
+  useEffect(() => { getCardThemes().then(setSavedThemes).catch(() => {}) }, [])
+
+  const applyTheme = (t: CardTheme) => {
+    setUseCustomAccent(true)
+    setCustomAccentHex(t.accentHex)
+    if (t.textMode === 'custom' && t.textHex) { setTextColorMode('custom'); setCustomTextHex(t.textHex) }
+    else setTextColorMode('auto')
+    if (t.template) setTemplate(t.template as Template)
+    if (t.background) setBackground(t.background as BackgroundStyle)
+  }
+
+  const handleSaveTheme = async () => {
+    const name = themeName.trim()
+    if (!name) { setThemeMsg('Enter a theme name'); return }
+    try {
+      await saveCardTheme({ data: {
+        name,
+        accentHex: useCustomAccent ? customAccentHex : '#0071e3',
+        textMode: textColorMode,
+        textHex: textColorMode === 'custom' ? customTextHex : null,
+        template, background,
+      } })
+      setThemeMsg(`Saved "${name}"`)
+      setThemeName('')
+      getCardThemes().then(setSavedThemes).catch(() => {})
+    } catch (e: any) { setThemeMsg(e?.message || 'Save failed') }
+  }
+
+  const handleDeleteTheme = async (id: number) => {
+    try { await deleteCardTheme({ data: { id } }); setSavedThemes((prev) => prev.filter((t) => t.id !== id)) }
+    catch { /* non-fatal */ }
+  }
   const [showLogo, setShowLogo] = useState(true)
   const [logoH, setLogoH] = useState<LogoH>('center')
   const [logoV, setLogoV] = useState<LogoV>('top')
@@ -858,6 +904,40 @@ export function ScheduleCardGenerator({
                   <button onClick={() => setUseCustomAccent(false)} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${!useCustomAccent ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Site Theme</button>
                   <button onClick={() => setUseCustomAccent(true)} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${useCustomAccent ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Custom</button>
                   {useCustomAccent && <input type="color" value={customAccentHex} onChange={(e) => setCustomAccentHex(e.target.value)} className="w-10 h-9 rounded-lg border border-[rgb(var(--border-soft))] cursor-pointer" />}
+                </div>
+                {hasCommunityPalette && (
+                  <button
+                    onClick={() => { setUseCustomAccent(true); setCustomAccentHex(communityPrimary!); if (communitySecondary) { setTextColorMode('custom'); setCustomTextHex(communitySecondary) } }}
+                    className="mt-2 w-full py-1.5 rounded-lg text-[11px] font-bold border border-[rgb(var(--border-soft))] hover:border-blue-500 flex items-center justify-center gap-1.5">
+                    <span className="inline-block w-3 h-3 rounded-full" style={{ background: communityPrimary! }} />
+                    Reset to community palette
+                  </button>
+                )}
+                {communityColors && communityColors.length > 1 && (
+                  <p className="mt-1 text-[10px] text-[rgb(var(--muted-fg))]">This schedule spans {communityColors.length} communities — using the first community's primary. Pick Custom to blend manually.</p>
+                )}
+                {/* Saved, reusable named themes */}
+                <div className="mt-3 pt-3 border-t border-[rgb(var(--border-soft))]">
+                  <label className="text-[11px] font-bold text-[rgb(var(--muted-fg))] flex items-center gap-1 mb-1.5"><Palette size={11} /> Saved Themes</label>
+                  {savedThemes.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {savedThemes.map((t) => (
+                        <span key={t.id} className="group inline-flex items-center gap-1 text-[10px] font-bold pl-1 pr-1.5 py-0.5 rounded-full border border-[rgb(var(--border-soft))]">
+                          <button onClick={() => applyTheme(t)} className="inline-flex items-center gap-1">
+                            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: t.accentHex }} />
+                            {t.name}
+                          </button>
+                          <button onClick={() => handleDeleteTheme(t.id)} className="opacity-40 hover:opacity-100" title="Delete theme">×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5">
+                    <input value={themeName} onChange={(e) => setThemeName(e.target.value)} placeholder="Name this theme…"
+                      className="flex-1 text-[11px] rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-2 py-1.5 focus:outline-none focus:border-blue-500" />
+                    <button onClick={handleSaveTheme} className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Save</button>
+                  </div>
+                  {themeMsg && <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1">{themeMsg}</p>}
                 </div>
               </div>
 
