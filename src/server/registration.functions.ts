@@ -320,6 +320,51 @@ export const getRegistrations = createServerFn({ method: 'GET' })
   })
 
 // ─── Admin: update a registration's status ──────────────────────────────────────
+// ─── Admin: update a registration's payment ──────────────────────────────────
+// Sets amount_paid and derives payment_status (unpaid/partially_paid/paid) from
+// it vs amount_due, so status and figures never disagree (single source of truth).
+export const updateRegistrationPayment = createServerFn({ method: 'POST' })
+  .inputValidator((data: { id: number; amountPaid: number }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
+    return withRetry(async () => {
+      const paid = Math.max(0, Number(data.amountPaid) || 0)
+      const rows = await db.execute(sql`
+        UPDATE registrations SET
+          amount_paid = ${paid},
+          payment_status = CASE
+            WHEN ${paid} <= 0 THEN 'unpaid'
+            WHEN ${paid} >= amount_due THEN 'paid'
+            ELSE 'partially_paid'
+          END,
+          updated_at = now()
+        WHERE id = ${data.id}
+        RETURNING *
+      `)
+      return mapRegistration(rows.rows[0])
+    })
+  })
+
+// ─── Admin: mark fully paid / unpaid quickly ─────────────────────────────────
+export const setRegistrationPaid = createServerFn({ method: 'POST' })
+  .inputValidator((data: { id: number; paid: boolean }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
+    return withRetry(async () => {
+      const rows = await db.execute(sql`
+        UPDATE registrations SET
+          amount_paid = CASE WHEN ${data.paid} THEN amount_due ELSE 0 END,
+          payment_status = CASE WHEN ${data.paid} THEN 'paid' ELSE 'unpaid' END,
+          updated_at = now()
+        WHERE id = ${data.id}
+        RETURNING *
+      `)
+      return mapRegistration(rows.rows[0])
+    })
+  })
+
 export const updateRegistrationStatus = createServerFn({ method: 'POST' })
   .inputValidator((data: { id: number; status: 'pending' | 'confirmed' | 'cancelled' | 'waitlisted' }) => data)
   .handler(async ({ data }) => {
@@ -397,3 +442,39 @@ export const getRegistrationDbDiagnostic = createServerFn({ method: 'GET' }).han
     }
   })
 })
+
+// ─── Admin: payment collection summary for a schedule ────────────────────────
+// Totals expected/collected/outstanding so the admin sees where money stands.
+// Fail-soft: returns zeros if the pricing columns aren't present yet.
+export const getPaymentSummary = createServerFn({ method: 'POST' })
+  .inputValidator((data: { scheduleId: number | null }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
+    return withRetry(async () => {
+      try {
+        const where = data.scheduleId ? sql`WHERE schedule_id = ${data.scheduleId} AND status != 'cancelled'` : sql`WHERE status != 'cancelled'`
+        const r = await db.execute(sql`
+          SELECT
+            COALESCE(SUM(amount_due), 0)::numeric  AS expected,
+            COALESCE(SUM(amount_paid), 0)::numeric AS collected,
+            COUNT(*) FILTER (WHERE payment_status = 'paid')::int           AS paid_count,
+            COUNT(*) FILTER (WHERE payment_status = 'partially_paid')::int AS partial_count,
+            COUNT(*) FILTER (WHERE payment_status = 'unpaid')::int         AS unpaid_count
+          FROM registrations ${where}
+        `)
+        const row = r.rows[0] as any
+        const expected = Number(row?.expected ?? 0)
+        const collected = Number(row?.collected ?? 0)
+        return {
+          expected, collected,
+          outstanding: Number((expected - collected).toFixed(2)),
+          paidCount: Number(row?.paid_count ?? 0),
+          partialCount: Number(row?.partial_count ?? 0),
+          unpaidCount: Number(row?.unpaid_count ?? 0),
+        }
+      } catch {
+        return { expected: 0, collected: 0, outstanding: 0, paidCount: 0, partialCount: 0, unpaidCount: 0 }
+      }
+    })
+  })
