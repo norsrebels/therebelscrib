@@ -160,6 +160,7 @@ function AdminRegistrationsPage() {
         date: s.date, startTime: s.startTime, endDate: s.endDate, endTime: s.endTime,
         venue: s.venue ?? '', description: s.description ?? '', status: 'active',
         capacity: s.capacity, customFields: s.customFields,
+        pricePerPlayer: s.pricePerPlayer,
         linkedTournamentExternalId: s.linkedTournamentExternalId ?? null,
       },
     })
@@ -443,6 +444,7 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
   const [description, setDescription] = useState(schedule?.description ?? '')
   const [status, setStatus] = useState(schedule?.status ?? 'active')
   const [capacity, setCapacity] = useState(schedule?.capacity?.toString() ?? '')
+  const [pricePerPlayer, setPricePerPlayer] = useState(schedule?.pricePerPlayer?.toString() ?? '0')
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>(schedule?.customFields ?? [])
   const [allCommunities, setAllCommunities] = useState<{ id: number; name: string; colorPrimary: string; colorSecondary: string }[]>([])
   const [selectedCommunityIds, setSelectedCommunityIds] = useState<number[]>([])
@@ -478,6 +480,7 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
       endDate: endDate || null, endTime: endTime || null,
       venue, description,
       capacity: capacity ? parseInt(capacity, 10) : null, status, customFields,
+      pricePerPlayer: pricePerPlayer ? parseFloat(pricePerPlayer) : 0,
       linkedTournamentExternalId: schedule?.linkedTournamentExternalId ?? null,
     }
     try {
@@ -554,6 +557,12 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
               <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Capacity (optional)</label>
               <input type="number" min="0" value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Unlimited"
                 className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Price per player</label>
+              <input type="number" min="0" step="0.01" value={pricePerPlayer} onChange={(e) => setPricePerPlayer(e.target.value)} placeholder="0.00"
+                className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+              <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-0.5">Applied per person (×roster size for groups). 0 = free.</p>
             </div>
           </div>
           <div>
