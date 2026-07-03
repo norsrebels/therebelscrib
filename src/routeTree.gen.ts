@@ -15,16 +15,25 @@ import { Route as TournamentFormatRouteImport } from './routes/tournament-format
 import { Route as StatLoginRouteImport } from './routes/stat-login'
 import { Route as StatAdminRouteImport } from './routes/stat-admin'
 import { Route as SocialRouteImport } from './routes/social'
+import { Route as RegistrationRouteImport } from './routes/registration'
+import { Route as PollsRouteImport } from './routes/polls'
 import { Route as PlayerDexRouteImport } from './routes/player-dex'
+import { Route as MeRouteImport } from './routes/me'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LeaderboardRouteImport } from './routes/leaderboard'
+import { Route as JoinRouteImport } from './routes/join'
 import { Route as GalleryRouteImport } from './routes/gallery'
 import { Route as ConfigurationRouteImport } from './routes/configuration'
+import { Route as CommunitiesRouteImport } from './routes/communities'
+import { Route as ChatRouteImport } from './routes/chat'
 import { Route as AssessmentRouteImport } from './routes/assessment'
+import { Route as AdminRegistrationsRouteImport } from './routes/admin-registrations'
+import { Route as AdminDbConsoleRouteImport } from './routes/admin-db-console'
+import { Route as AdminDbCheckRouteImport } from './routes/admin-db-check'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ScoreboardTournamentIdRouteImport } from './routes/scoreboard.$tournamentId'
 import { Route as LiveTournamentIdRouteImport } from './routes/live.$tournamentId'
 import { Route as ApiPlayersRouteImport } from './routes/api.players'
+import { Route as ApiMessagesRouteImport } from './routes/api.messages'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as ApiAdminResetRouteImport } from './routes/api.admin-reset'
 import { Route as ApiTournamentIdRouteImport } from './routes/api.tournament.$id'
@@ -60,9 +69,24 @@ const SocialRoute = SocialRouteImport.update({
   path: '/social',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RegistrationRoute = RegistrationRouteImport.update({
+  id: '/registration',
+  path: '/registration',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PollsRoute = PollsRouteImport.update({
+  id: '/polls',
+  path: '/polls',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlayerDexRoute = PlayerDexRouteImport.update({
   id: '/player-dex',
   path: '/player-dex',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MeRoute = MeRouteImport.update({
+  id: '/me',
+  path: '/me',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -75,6 +99,11 @@ const LeaderboardRoute = LeaderboardRouteImport.update({
   path: '/leaderboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JoinRoute = JoinRouteImport.update({
+  id: '/join',
+  path: '/join',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GalleryRoute = GalleryRouteImport.update({
   id: '/gallery',
   path: '/gallery',
@@ -85,19 +114,39 @@ const ConfigurationRoute = ConfigurationRouteImport.update({
   path: '/configuration',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CommunitiesRoute = CommunitiesRouteImport.update({
+  id: '/communities',
+  path: '/communities',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatRoute = ChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AssessmentRoute = AssessmentRouteImport.update({
   id: '/assessment',
   path: '/assessment',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRegistrationsRoute = AdminRegistrationsRouteImport.update({
+  id: '/admin-registrations',
+  path: '/admin-registrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminDbConsoleRoute = AdminDbConsoleRouteImport.update({
+  id: '/admin-db-console',
+  path: '/admin-db-console',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminDbCheckRoute = AdminDbCheckRouteImport.update({
+  id: '/admin-db-check',
+  path: '/admin-db-check',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ScoreboardTournamentIdRoute = ScoreboardTournamentIdRouteImport.update({
-  id: '/scoreboard/$tournamentId',
-  path: '/scoreboard/$tournamentId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LiveTournamentIdRoute = LiveTournamentIdRouteImport.update({
@@ -108,6 +157,11 @@ const LiveTournamentIdRoute = LiveTournamentIdRouteImport.update({
 const ApiPlayersRoute = ApiPlayersRouteImport.update({
   id: '/api/players',
   path: '/api/players',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMessagesRoute = ApiMessagesRouteImport.update({
+  id: '/api/messages',
+  path: '/api/messages',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiChatRoute = ApiChatRouteImport.update({
@@ -133,12 +187,21 @@ const ApiImageIdRoute = ApiImageIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin-db-check': typeof AdminDbCheckRoute
+  '/admin-db-console': typeof AdminDbConsoleRoute
+  '/admin-registrations': typeof AdminRegistrationsRoute
   '/assessment': typeof AssessmentRoute
+  '/chat': typeof ChatRoute
+  '/communities': typeof CommunitiesRoute
   '/configuration': typeof ConfigurationRoute
   '/gallery': typeof GalleryRoute
+  '/join': typeof JoinRoute
   '/leaderboard': typeof LeaderboardRoute
   '/login': typeof LoginRoute
+  '/me': typeof MeRoute
   '/player-dex': typeof PlayerDexRoute
+  '/polls': typeof PollsRoute
+  '/registration': typeof RegistrationRoute
   '/social': typeof SocialRoute
   '/stat-admin': typeof StatAdminRoute
   '/stat-login': typeof StatLoginRoute
@@ -147,20 +210,29 @@ export interface FileRoutesByFullPath {
   '/vis-stats': typeof VisStatsRoute
   '/api/admin-reset': typeof ApiAdminResetRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/messages': typeof ApiMessagesRoute
   '/api/players': typeof ApiPlayersRoute
   '/live/$tournamentId': typeof LiveTournamentIdRoute
-  '/scoreboard/$tournamentId': typeof ScoreboardTournamentIdRoute
   '/api/image/$id': typeof ApiImageIdRoute
   '/api/tournament/$id': typeof ApiTournamentIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin-db-check': typeof AdminDbCheckRoute
+  '/admin-db-console': typeof AdminDbConsoleRoute
+  '/admin-registrations': typeof AdminRegistrationsRoute
   '/assessment': typeof AssessmentRoute
+  '/chat': typeof ChatRoute
+  '/communities': typeof CommunitiesRoute
   '/configuration': typeof ConfigurationRoute
   '/gallery': typeof GalleryRoute
+  '/join': typeof JoinRoute
   '/leaderboard': typeof LeaderboardRoute
   '/login': typeof LoginRoute
+  '/me': typeof MeRoute
   '/player-dex': typeof PlayerDexRoute
+  '/polls': typeof PollsRoute
+  '/registration': typeof RegistrationRoute
   '/social': typeof SocialRoute
   '/stat-admin': typeof StatAdminRoute
   '/stat-login': typeof StatLoginRoute
@@ -169,21 +241,30 @@ export interface FileRoutesByTo {
   '/vis-stats': typeof VisStatsRoute
   '/api/admin-reset': typeof ApiAdminResetRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/messages': typeof ApiMessagesRoute
   '/api/players': typeof ApiPlayersRoute
   '/live/$tournamentId': typeof LiveTournamentIdRoute
-  '/scoreboard/$tournamentId': typeof ScoreboardTournamentIdRoute
   '/api/image/$id': typeof ApiImageIdRoute
   '/api/tournament/$id': typeof ApiTournamentIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin-db-check': typeof AdminDbCheckRoute
+  '/admin-db-console': typeof AdminDbConsoleRoute
+  '/admin-registrations': typeof AdminRegistrationsRoute
   '/assessment': typeof AssessmentRoute
+  '/chat': typeof ChatRoute
+  '/communities': typeof CommunitiesRoute
   '/configuration': typeof ConfigurationRoute
   '/gallery': typeof GalleryRoute
+  '/join': typeof JoinRoute
   '/leaderboard': typeof LeaderboardRoute
   '/login': typeof LoginRoute
+  '/me': typeof MeRoute
   '/player-dex': typeof PlayerDexRoute
+  '/polls': typeof PollsRoute
+  '/registration': typeof RegistrationRoute
   '/social': typeof SocialRoute
   '/stat-admin': typeof StatAdminRoute
   '/stat-login': typeof StatLoginRoute
@@ -192,9 +273,9 @@ export interface FileRoutesById {
   '/vis-stats': typeof VisStatsRoute
   '/api/admin-reset': typeof ApiAdminResetRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/messages': typeof ApiMessagesRoute
   '/api/players': typeof ApiPlayersRoute
   '/live/$tournamentId': typeof LiveTournamentIdRoute
-  '/scoreboard/$tournamentId': typeof ScoreboardTournamentIdRoute
   '/api/image/$id': typeof ApiImageIdRoute
   '/api/tournament/$id': typeof ApiTournamentIdRoute
 }
@@ -202,12 +283,21 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin-db-check'
+    | '/admin-db-console'
+    | '/admin-registrations'
     | '/assessment'
+    | '/chat'
+    | '/communities'
     | '/configuration'
     | '/gallery'
+    | '/join'
     | '/leaderboard'
     | '/login'
+    | '/me'
     | '/player-dex'
+    | '/polls'
+    | '/registration'
     | '/social'
     | '/stat-admin'
     | '/stat-login'
@@ -216,20 +306,29 @@ export interface FileRouteTypes {
     | '/vis-stats'
     | '/api/admin-reset'
     | '/api/chat'
+    | '/api/messages'
     | '/api/players'
     | '/live/$tournamentId'
-    | '/scoreboard/$tournamentId'
     | '/api/image/$id'
     | '/api/tournament/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin-db-check'
+    | '/admin-db-console'
+    | '/admin-registrations'
     | '/assessment'
+    | '/chat'
+    | '/communities'
     | '/configuration'
     | '/gallery'
+    | '/join'
     | '/leaderboard'
     | '/login'
+    | '/me'
     | '/player-dex'
+    | '/polls'
+    | '/registration'
     | '/social'
     | '/stat-admin'
     | '/stat-login'
@@ -238,20 +337,29 @@ export interface FileRouteTypes {
     | '/vis-stats'
     | '/api/admin-reset'
     | '/api/chat'
+    | '/api/messages'
     | '/api/players'
     | '/live/$tournamentId'
-    | '/scoreboard/$tournamentId'
     | '/api/image/$id'
     | '/api/tournament/$id'
   id:
     | '__root__'
     | '/'
+    | '/admin-db-check'
+    | '/admin-db-console'
+    | '/admin-registrations'
     | '/assessment'
+    | '/chat'
+    | '/communities'
     | '/configuration'
     | '/gallery'
+    | '/join'
     | '/leaderboard'
     | '/login'
+    | '/me'
     | '/player-dex'
+    | '/polls'
+    | '/registration'
     | '/social'
     | '/stat-admin'
     | '/stat-login'
@@ -260,21 +368,30 @@ export interface FileRouteTypes {
     | '/vis-stats'
     | '/api/admin-reset'
     | '/api/chat'
+    | '/api/messages'
     | '/api/players'
     | '/live/$tournamentId'
-    | '/scoreboard/$tournamentId'
     | '/api/image/$id'
     | '/api/tournament/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminDbCheckRoute: typeof AdminDbCheckRoute
+  AdminDbConsoleRoute: typeof AdminDbConsoleRoute
+  AdminRegistrationsRoute: typeof AdminRegistrationsRoute
   AssessmentRoute: typeof AssessmentRoute
+  ChatRoute: typeof ChatRoute
+  CommunitiesRoute: typeof CommunitiesRoute
   ConfigurationRoute: typeof ConfigurationRoute
   GalleryRoute: typeof GalleryRoute
+  JoinRoute: typeof JoinRoute
   LeaderboardRoute: typeof LeaderboardRoute
   LoginRoute: typeof LoginRoute
+  MeRoute: typeof MeRoute
   PlayerDexRoute: typeof PlayerDexRoute
+  PollsRoute: typeof PollsRoute
+  RegistrationRoute: typeof RegistrationRoute
   SocialRoute: typeof SocialRoute
   StatAdminRoute: typeof StatAdminRoute
   StatLoginRoute: typeof StatLoginRoute
@@ -283,9 +400,9 @@ export interface RootRouteChildren {
   VisStatsRoute: typeof VisStatsRoute
   ApiAdminResetRoute: typeof ApiAdminResetRoute
   ApiChatRoute: typeof ApiChatRoute
+  ApiMessagesRoute: typeof ApiMessagesRoute
   ApiPlayersRoute: typeof ApiPlayersRoute
   LiveTournamentIdRoute: typeof LiveTournamentIdRoute
-  ScoreboardTournamentIdRoute: typeof ScoreboardTournamentIdRoute
   ApiImageIdRoute: typeof ApiImageIdRoute
   ApiTournamentIdRoute: typeof ApiTournamentIdRoute
 }
@@ -334,11 +451,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SocialRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/registration': {
+      id: '/registration'
+      path: '/registration'
+      fullPath: '/registration'
+      preLoaderRoute: typeof RegistrationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/polls': {
+      id: '/polls'
+      path: '/polls'
+      fullPath: '/polls'
+      preLoaderRoute: typeof PollsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/player-dex': {
       id: '/player-dex'
       path: '/player-dex'
       fullPath: '/player-dex'
       preLoaderRoute: typeof PlayerDexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/me': {
+      id: '/me'
+      path: '/me'
+      fullPath: '/me'
+      preLoaderRoute: typeof MeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -355,6 +493,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LeaderboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/join': {
+      id: '/join'
+      path: '/join'
+      fullPath: '/join'
+      preLoaderRoute: typeof JoinRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/gallery': {
       id: '/gallery'
       path: '/gallery'
@@ -369,6 +514,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfigurationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/communities': {
+      id: '/communities'
+      path: '/communities'
+      fullPath: '/communities'
+      preLoaderRoute: typeof CommunitiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat': {
+      id: '/chat'
+      path: '/chat'
+      fullPath: '/chat'
+      preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/assessment': {
       id: '/assessment'
       path: '/assessment'
@@ -376,18 +535,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssessmentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin-registrations': {
+      id: '/admin-registrations'
+      path: '/admin-registrations'
+      fullPath: '/admin-registrations'
+      preLoaderRoute: typeof AdminRegistrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin-db-console': {
+      id: '/admin-db-console'
+      path: '/admin-db-console'
+      fullPath: '/admin-db-console'
+      preLoaderRoute: typeof AdminDbConsoleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin-db-check': {
+      id: '/admin-db-check'
+      path: '/admin-db-check'
+      fullPath: '/admin-db-check'
+      preLoaderRoute: typeof AdminDbCheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/scoreboard/$tournamentId': {
-      id: '/scoreboard/$tournamentId'
-      path: '/scoreboard/$tournamentId'
-      fullPath: '/scoreboard/$tournamentId'
-      preLoaderRoute: typeof ScoreboardTournamentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/live/$tournamentId': {
@@ -402,6 +575,13 @@ declare module '@tanstack/react-router' {
       path: '/api/players'
       fullPath: '/api/players'
       preLoaderRoute: typeof ApiPlayersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/messages': {
+      id: '/api/messages'
+      path: '/api/messages'
+      fullPath: '/api/messages'
+      preLoaderRoute: typeof ApiMessagesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/chat': {
@@ -437,12 +617,21 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminDbCheckRoute: AdminDbCheckRoute,
+  AdminDbConsoleRoute: AdminDbConsoleRoute,
+  AdminRegistrationsRoute: AdminRegistrationsRoute,
   AssessmentRoute: AssessmentRoute,
+  ChatRoute: ChatRoute,
+  CommunitiesRoute: CommunitiesRoute,
   ConfigurationRoute: ConfigurationRoute,
   GalleryRoute: GalleryRoute,
+  JoinRoute: JoinRoute,
   LeaderboardRoute: LeaderboardRoute,
   LoginRoute: LoginRoute,
+  MeRoute: MeRoute,
   PlayerDexRoute: PlayerDexRoute,
+  PollsRoute: PollsRoute,
+  RegistrationRoute: RegistrationRoute,
   SocialRoute: SocialRoute,
   StatAdminRoute: StatAdminRoute,
   StatLoginRoute: StatLoginRoute,
@@ -451,9 +640,9 @@ const rootRouteChildren: RootRouteChildren = {
   VisStatsRoute: VisStatsRoute,
   ApiAdminResetRoute: ApiAdminResetRoute,
   ApiChatRoute: ApiChatRoute,
+  ApiMessagesRoute: ApiMessagesRoute,
   ApiPlayersRoute: ApiPlayersRoute,
   LiveTournamentIdRoute: LiveTournamentIdRoute,
-  ScoreboardTournamentIdRoute: ScoreboardTournamentIdRoute,
   ApiImageIdRoute: ApiImageIdRoute,
   ApiTournamentIdRoute: ApiTournamentIdRoute,
 }
