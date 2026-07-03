@@ -32,6 +32,7 @@ export interface RegistrationSchedule {
   description: string | null
   status: 'active' | 'closed' | 'archived'
   capacity: number | null
+  pricePerPlayer: number
   customFields: CustomFieldDefinition[]
   linkedTournamentExternalId: string | null
   createdAt: string
@@ -57,6 +58,9 @@ export interface Registration {
   facebookUrl: string | null
   customAnswers: Record<string, any>
   status: 'pending' | 'confirmed' | 'cancelled' | 'waitlisted'
+  amountDue: number
+  amountPaid: number
+  paymentStatus: 'unpaid' | 'paid' | 'partially_paid'
   createdAt: string
 }
 
@@ -73,6 +77,7 @@ function mapSchedule(r: any): RegistrationSchedule {
     description: r.description,
     status: r.status,
     capacity: r.capacity,
+    pricePerPlayer: r.price_per_player != null ? Number(r.price_per_player) : 0,
     customFields: r.custom_fields ?? [],
     linkedTournamentExternalId: r.linked_tournament_external_id,
     createdAt: r.created_at,
@@ -95,6 +100,9 @@ function mapRegistration(r: any): Registration {
     facebookUrl: r.facebook_url,
     customAnswers: r.custom_answers ?? {},
     status: r.status,
+    amountDue: r.amount_due != null ? Number(r.amount_due) : 0,
+    amountPaid: r.amount_paid != null ? Number(r.amount_paid) : 0,
+    paymentStatus: r.payment_status ?? 'unpaid',
     createdAt: r.created_at,
   }
 }
@@ -136,6 +144,7 @@ export const createRegistrationSchedule = createServerFn({ method: 'POST' })
     name: string; sport: string
     date: string | null; startTime: string | null; endDate: string | null; endTime: string | null
     venue: string; description: string; capacity: number | null; status?: string
+    pricePerPlayer?: number
     customFields: CustomFieldDefinition[]; linkedTournamentExternalId: string | null
   }) => data)
   .handler(async ({ data }) => {
@@ -144,11 +153,11 @@ export const createRegistrationSchedule = createServerFn({ method: 'POST' })
     return withRetry(async () => {
       const rows = await db.execute(sql`
         INSERT INTO registration_schedules
-          (name, sport, date, start_time, end_date, end_time, venue, description, capacity, status, custom_fields, linked_tournament_external_id)
+          (name, sport, date, start_time, end_date, end_time, venue, description, capacity, status, price_per_player, custom_fields, linked_tournament_external_id)
         VALUES (
           ${data.name}, ${data.sport || 'Volleyball'},
           ${data.date || null}, ${data.startTime || null}, ${data.endDate || null}, ${data.endTime || null},
-          ${data.venue}, ${data.description}, ${data.capacity}, ${data.status || 'active'},
+          ${data.venue}, ${data.description}, ${data.capacity}, ${data.status || 'active'}, ${data.pricePerPlayer ?? 0},
           ${JSON.stringify(data.customFields ?? [])}::jsonb, ${data.linkedTournamentExternalId}
         )
         RETURNING *
@@ -163,6 +172,7 @@ export const updateRegistrationSchedule = createServerFn({ method: 'POST' })
     id: number; name: string; sport: string
     date: string | null; startTime: string | null; endDate: string | null; endTime: string | null
     venue: string; description: string; status: string; capacity: number | null
+    pricePerPlayer?: number
     customFields: CustomFieldDefinition[]; linkedTournamentExternalId: string | null
   }) => data)
   .handler(async ({ data }) => {
@@ -175,7 +185,8 @@ export const updateRegistrationSchedule = createServerFn({ method: 'POST' })
           date = ${data.date || null}, start_time = ${data.startTime || null},
           end_date = ${data.endDate || null}, end_time = ${data.endTime || null},
           venue = ${data.venue}, description = ${data.description}, status = ${data.status},
-          capacity = ${data.capacity}, custom_fields = ${JSON.stringify(data.customFields ?? [])}::jsonb,
+          capacity = ${data.capacity}, price_per_player = COALESCE(${data.pricePerPlayer ?? null}, price_per_player),
+          custom_fields = ${JSON.stringify(data.customFields ?? [])}::jsonb,
           linked_tournament_external_id = ${data.linkedTournamentExternalId}, updated_at = now()
         WHERE id = ${data.id}
         RETURNING *
@@ -231,6 +242,13 @@ export const submitRegistration = createServerFn({ method: 'POST' })
       const isFull = sched.capacity !== null && Number(sched.registration_count) >= Number(sched.capacity)
       const initialStatus = isFull ? 'waitlisted' : 'pending'
 
+      // Capture the price AT SIGNUP so financial reports reflect what was actually
+      // charged, not the schedule's current price (which may change later).
+      // Pricing is per-player: headcount = 1 for individual, else roster length.
+      const headcount = data.regType === 'individual' ? 1 : Math.max((data.roster ?? []).length, 1)
+      const pricePerPlayer = sched.price_per_player != null ? Number(sched.price_per_player) : 0
+      const amountDue = Number((pricePerPlayer * headcount).toFixed(2))
+
       // Insert atomically: the row is only created if the schedule still exists at
       // write time (INSERT ... SELECT ... WHERE EXISTS). This does the existence
       // check and the insert in ONE statement on ONE connection, so a stale or
@@ -238,11 +256,12 @@ export const submitRegistration = createServerFn({ method: 'POST' })
       // instead we detect zero rows inserted and return a clean message.
       const rows = await db.execute(sql`
         INSERT INTO registrations
-          (schedule_id, reg_type, name, position, team_name, roster, contact_number, email, facebook_url, custom_answers, status, netlify_user_id)
+          (schedule_id, reg_type, name, position, team_name, roster, contact_number, email, facebook_url, custom_answers, status, netlify_user_id, amount_due, amount_paid, payment_status, priced_at)
         SELECT
           ${data.scheduleId}, ${data.regType}, ${data.name || null}, ${data.position || null}, ${data.teamName || null},
           ${JSON.stringify(data.roster ?? [])}::jsonb, ${data.contactNumber || null}, ${data.email || null}, ${data.facebookUrl || null},
-          ${JSON.stringify(data.customAnswers ?? {})}::jsonb, ${initialStatus}, ${identity?.userId ?? null}
+          ${JSON.stringify(data.customAnswers ?? {})}::jsonb, ${initialStatus}, ${identity?.userId ?? null},
+          ${amountDue}, 0, ${amountDue > 0 ? 'unpaid' : 'paid'}, now()
         WHERE EXISTS (SELECT 1 FROM registration_schedules WHERE id = ${data.scheduleId})
         RETURNING *
       `)
