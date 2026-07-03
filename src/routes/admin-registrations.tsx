@@ -9,6 +9,9 @@ import {
   updateRegistrationStatus,
   deleteRegistration,
   getRegistrationsHeartbeat,
+  updateRegistrationPayment,
+  setRegistrationPaid,
+  getPaymentSummary,
   type RegistrationSchedule,
   type Registration,
   type CustomFieldDefinition,
@@ -139,6 +142,26 @@ function AdminRegistrationsPage() {
     }, 15000)
     return () => clearInterval(interval)
   }, [scheduleFilter])
+
+  const [paymentSummary, setPaymentSummary] = useState<{ expected: number; collected: number; outstanding: number; paidCount: number; partialCount: number; unpaidCount: number } | null>(null)
+
+  const loadPaymentSummary = useCallback(() => {
+    getPaymentSummary({ data: { scheduleId: scheduleFilter } })
+      .then(setPaymentSummary)
+      .catch(() => setPaymentSummary(null))
+  }, [scheduleFilter])
+
+  useEffect(() => { loadPaymentSummary() }, [loadPaymentSummary, registrations])
+
+  const handleTogglePaid = async (id: number, paid: boolean) => {
+    const updated = await setRegistrationPaid({ data: { id, paid } })
+    setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, amountPaid: updated.amountPaid, paymentStatus: updated.paymentStatus } : r)))
+  }
+
+  const handleSetAmountPaid = async (id: number, amountPaid: number) => {
+    const updated = await updateRegistrationPayment({ data: { id, amountPaid } })
+    setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, amountPaid: updated.amountPaid, paymentStatus: updated.paymentStatus } : r)))
+  }
 
   const handleStatusChange = async (id: number, status: Registration['status']) => {
     await updateRegistrationStatus({ data: { id, status } })
@@ -328,6 +351,31 @@ function AdminRegistrationsPage() {
       </div>
 
       {/* The Rebels Registrations list */}
+      {paymentSummary && paymentSummary.expected > 0 && (
+        <div className="flex flex-wrap gap-3 mb-4">
+          <div className="flex-1 min-w-[120px] rounded-xl border border-[rgb(var(--border-soft))] px-4 py-2.5">
+            <p className="text-[10px] uppercase font-bold text-[rgb(var(--muted-fg))]">Expected</p>
+            <p className="text-lg font-bold">{paymentSummary.expected.toFixed(2)}</p>
+          </div>
+          <div className="flex-1 min-w-[120px] rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-2.5">
+            <p className="text-[10px] uppercase font-bold text-green-600">Collected</p>
+            <p className="text-lg font-bold text-green-600">{paymentSummary.collected.toFixed(2)}</p>
+          </div>
+          <div className="flex-1 min-w-[120px] rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-2.5">
+            <p className="text-[10px] uppercase font-bold text-red-500">Outstanding</p>
+            <p className="text-lg font-bold text-red-500">{paymentSummary.outstanding.toFixed(2)}</p>
+          </div>
+          <div className="flex-1 min-w-[140px] rounded-xl border border-[rgb(var(--border-soft))] px-4 py-2.5">
+            <p className="text-[10px] uppercase font-bold text-[rgb(var(--muted-fg))]">Payment status</p>
+            <p className="text-xs font-bold mt-0.5">
+              <span className="text-green-600">{paymentSummary.paidCount} paid</span> ·
+              <span className="text-amber-600"> {paymentSummary.partialCount} partial</span> ·
+              <span className="text-red-500"> {paymentSummary.unpaidCount} unpaid</span>
+            </p>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <p className="text-center text-sm text-[rgb(var(--muted-fg))] py-12">Loading…</p>
       ) : registrations.length === 0 ? (
@@ -397,6 +445,37 @@ function AdminRegistrationsPage() {
                   className="text-xs rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-2 py-1.5 focus:outline-none focus:border-blue-500">
                   {Object.keys(STATUS_META).map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
                 </select>
+                {/* Payment: badge + amount + quick toggle */}
+                <div className="flex items-center gap-1.5">
+                  <span className={`px-2 py-1 rounded-full text-[11px] font-bold ${
+                    r.paymentStatus === 'paid' ? 'bg-green-500/10 text-green-600'
+                    : r.paymentStatus === 'partially_paid' ? 'bg-amber-500/10 text-amber-600'
+                    : 'bg-red-500/10 text-red-500'}`}>
+                    {r.paymentStatus === 'paid' ? 'Paid' : r.paymentStatus === 'partially_paid' ? 'Partial' : 'Unpaid'}
+                  </span>
+                  {r.amountDue > 0 && (
+                    <span className="text-[11px] text-[rgb(var(--muted-fg))]">
+                      {r.amountPaid.toFixed(2)}/{r.amountDue.toFixed(2)}
+                    </span>
+                  )}
+                  {r.amountDue > 0 && (
+                    <button
+                      onClick={() => handleTogglePaid(r.id, r.paymentStatus !== 'paid')}
+                      className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
+                        r.paymentStatus === 'paid'
+                          ? 'border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:border-red-400'
+                          : 'border-green-500/40 text-green-600 hover:bg-green-500/10'}`}>
+                      {r.paymentStatus === 'paid' ? 'Mark unpaid' : 'Mark paid'}
+                    </button>
+                  )}
+                  {r.amountDue > 0 && (
+                    <input type="number" min="0" step="0.01" defaultValue={r.amountPaid || ''}
+                      onBlur={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v !== r.amountPaid) handleSetAmountPaid(r.id, v) }}
+                      placeholder="Partial"
+                      title="Set amount paid (for partial payments)"
+                      className="w-16 text-[11px] rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-1.5 py-1 focus:outline-none focus:border-blue-500" />
+                  )}
+                </div>
                 <button onClick={() => handleDeleteRegistration(r.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors">
                   <Trash2 size={14} />
                 </button>
