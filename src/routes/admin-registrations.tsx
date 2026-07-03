@@ -14,9 +14,10 @@ import {
   type CustomFieldDefinition,
 } from '@/server/registration.functions'
 import { getCommunities, getScheduleCommunities, setScheduleCommunities } from '@/server/community.functions'
+import { ScheduleCardGenerator } from '@/components/ScheduleCardGenerator'
 import {
   Calendar, Plus, Trash2, X, Check, Clock, AlertTriangle, Ban,
-  Download, Search, ChevronDown, RefreshCw, Wifi,
+  Download, Search, ChevronDown, RefreshCw, Wifi, Image as ImageIcon,
 } from 'lucide-react'
 
 export const Route = createFileRoute('/admin-registrations')({
@@ -69,6 +70,22 @@ function AdminRegistrationsPage() {
 
   const [showScheduleEditor, setShowScheduleEditor] = useState(false)
   const [editingSchedule, setEditingSchedule] = useState<RegistrationSchedule | null>(null)
+
+  // Card generator: which schedule's card is open, plus its resolved community
+  // palette so the generator auto-themes from the schedule's community tags.
+  const [cardSchedule, setCardSchedule] = useState<RegistrationSchedule | null>(null)
+  const [cardCommunityColors, setCardCommunityColors] = useState<{ primary: string; secondary: string }[]>([])
+
+  const openCardGenerator = async (s: RegistrationSchedule) => {
+    // Resolve this schedule's community tags → their palettes, then open themed.
+    try {
+      const tags = await getScheduleCommunities({ data: { scheduleId: s.id } })
+      setCardCommunityColors((tags as any[]).map((c) => ({ primary: c.colorPrimary, secondary: c.colorSecondary })))
+    } catch {
+      setCardCommunityColors([]) // no tags / not available → generator opens neutral
+    }
+    setCardSchedule(s)
+  }
 
   // Polling / sync confidence (point c) — lightweight heartbeat compared against
   // what's currently loaded; mismatch triggers a refetch + shows a "new" indicator.
@@ -257,6 +274,7 @@ function AdminRegistrationsPage() {
               </button>
               <div className="flex flex-col gap-1">
                 <button onClick={() => { setEditingSchedule(s); setShowScheduleEditor(true) }} className="text-[10px] text-blue-500 hover:underline">Edit</button>
+                <button onClick={() => openCardGenerator(s)} className="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5"><ImageIcon size={9} /> Card</button>
                 {s.status === 'archived' ? (
                   <button onClick={() => handleRestoreSchedule(s.id)} className="text-[10px] text-green-500 hover:underline">Restore</button>
                 ) : (
@@ -392,6 +410,18 @@ function AdminRegistrationsPage() {
           schedule={editingSchedule}
           onClose={() => setShowScheduleEditor(false)}
           onSaved={() => { setShowScheduleEditor(false); loadSchedules() }}
+        />
+      )}
+
+      {cardSchedule && (
+        <ScheduleCardGenerator
+          scheduleName={cardSchedule.name}
+          defaultVenue={cardSchedule.venue ?? ''}
+          defaultDate={cardSchedule.date ?? ''}
+          defaultStartTime={cardSchedule.startTime ?? ''}
+          defaultEndTime={cardSchedule.endTime ?? ''}
+          communityColors={cardCommunityColors}
+          onClose={() => { setCardSchedule(null); setCardCommunityColors([]) }}
         />
       )}
     </div>
