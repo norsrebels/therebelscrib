@@ -478,3 +478,100 @@ export const getPaymentSummary = createServerFn({ method: 'POST' })
       }
     })
   })
+
+// ─── Reconcile amounts: preview + apply (per schedule) ───────────────────────
+// Recomputes each registration's amount_due from the schedule's CURRENT price x
+// headcount (individual=1, else roster size). Preview shows what would change so
+// the admin confirms before applying. Fixes ANY mismatch (not just zeros).
+// Payment status is only changed to keep it consistent with the new amount — it
+// never marks an unpaid registration as paid.
+
+const HEADCOUNT_SQL = sql`(CASE WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END)`
+
+export const previewReconcileSchedule = createServerFn({ method: 'POST' })
+  .inputValidator((data: { scheduleId: number }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
+    return withRetry(async () => {
+      try {
+        const r = await db.execute(sql`
+          SELECT
+            r.id, r.name, r.reg_type,
+            r.amount_due  AS current_amount_due,
+            r.amount_paid AS current_amount_paid,
+            r.payment_status AS current_status,
+            ${HEADCOUNT_SQL} AS headcount,
+            ROUND(s.price_per_player * ${HEADCOUNT_SQL}, 2) AS new_amount_due
+          FROM registrations r
+          JOIN registration_schedules s ON s.id = r.schedule_id
+          WHERE r.schedule_id = ${data.scheduleId}
+            AND r.status != 'cancelled'
+            AND ROUND(s.price_per_player * ${HEADCOUNT_SQL}, 2) <> r.amount_due
+          ORDER BY r.id
+        `)
+        return (r.rows as any[]).map((x) => ({
+          id: Number(x.id),
+          name: x.name,
+          regType: x.reg_type,
+          headcount: Number(x.headcount),
+          currentAmountDue: Number(x.current_amount_due),
+          newAmountDue: Number(x.new_amount_due),
+          currentAmountPaid: Number(x.current_amount_paid),
+          currentStatus: x.current_status,
+        }))
+      } catch {
+        return []
+      }
+    })
+  })
+
+export const applyReconcileSchedule = createServerFn({ method: 'POST' })
+  .inputValidator((data: { scheduleId: number; markPaid?: boolean }) => data)
+  .handler(async ({ data }) => {
+    const admin = await getAdminUser()
+    if (!admin) throw new Error('Admin access required')
+    return withRetry(async () => {
+      if (data.markPaid) {
+        // Fix amount AND mark fully paid (amount_paid = amount_due). Use only when
+        // you know the money for these records was collected.
+        const r = await db.execute(sql`
+          UPDATE registrations r
+          SET
+            amount_due  = ROUND(s.price_per_player * ${HEADCOUNT_SQL}, 2),
+            amount_paid = ROUND(s.price_per_player * ${HEADCOUNT_SQL}, 2),
+            payment_status = 'paid',
+            priced_at = COALESCE(r.priced_at, now()),
+            updated_at = now()
+          FROM registration_schedules s
+          WHERE r.schedule_id = s.id
+            AND r.schedule_id = ${data.scheduleId}
+            AND r.status != 'cancelled'
+            AND ROUND(s.price_per_player * ${HEADCOUNT_SQL}, 2) <> r.amount_due
+          RETURNING r.id
+        `)
+        return { updated: (r.rows as any[]).length }
+      }
+      // Default: fix amount only; re-derive status from what was ALREADY paid.
+      // Never fabricates payment — an unpaid record stays unpaid.
+      const r = await db.execute(sql`
+        UPDATE registrations r
+        SET
+          amount_due = ROUND(s.price_per_player * ${HEADCOUNT_SQL}, 2),
+          payment_status = CASE
+            WHEN r.amount_paid <= 0 THEN 'unpaid'
+            WHEN r.amount_paid >= ROUND(s.price_per_player * ${HEADCOUNT_SQL}, 2) THEN 'paid'
+            ELSE 'partially_paid'
+          END,
+          priced_at = COALESCE(r.priced_at, now()),
+          updated_at = now()
+        FROM registration_schedules s
+        WHERE r.schedule_id = s.id
+          AND r.schedule_id = ${data.scheduleId}
+          AND r.status != 'cancelled'
+          AND ROUND(s.price_per_player * ${HEADCOUNT_SQL}, 2) <> r.amount_due
+        RETURNING r.id
+      `)
+      return { updated: (r.rows as any[]).length }
+    })
+  })
