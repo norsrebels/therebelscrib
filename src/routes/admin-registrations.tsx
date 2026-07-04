@@ -12,6 +12,8 @@ import {
   updateRegistrationPayment,
   setRegistrationPaid,
   getPaymentSummary,
+  previewReconcileSchedule,
+  applyReconcileSchedule,
   type RegistrationSchedule,
   type Registration,
   type CustomFieldDefinition,
@@ -88,6 +90,35 @@ function AdminRegistrationsPage() {
       setCardCommunityColors([]) // no tags / not available → generator opens neutral
     }
     setCardSchedule(s)
+  }
+
+  // Reconcile amounts: preview which registrations on a schedule have amounts that
+  // don't match the schedule's current price, then apply after confirmation.
+  const [reconcileSchedule, setReconcileSchedule] = useState<RegistrationSchedule | null>(null)
+  const [reconcilePreview, setReconcilePreview] = useState<any[] | null>(null)
+  const [reconcileMarkPaid, setReconcileMarkPaid] = useState(false)
+  const [reconcileBusy, setReconcileBusy] = useState(false)
+
+  const openReconcile = async (s: RegistrationSchedule) => {
+    setReconcileSchedule(s); setReconcilePreview(null); setReconcileMarkPaid(false)
+    try {
+      const preview = await previewReconcileSchedule({ data: { scheduleId: s.id } })
+      setReconcilePreview(preview)
+    } catch {
+      setReconcilePreview([])
+    }
+  }
+
+  const applyReconcile = async () => {
+    if (!reconcileSchedule) return
+    setReconcileBusy(true)
+    try {
+      await applyReconcileSchedule({ data: { scheduleId: reconcileSchedule.id, markPaid: reconcileMarkPaid } })
+      setReconcileSchedule(null); setReconcilePreview(null)
+      loadRegistrations()
+      loadPaymentSummary()
+    } catch { /* leave modal open on failure */ }
+    setReconcileBusy(false)
   }
 
   // Polling / sync confidence (point c) — lightweight heartbeat compared against
@@ -299,6 +330,7 @@ function AdminRegistrationsPage() {
               <div className="flex flex-col gap-1">
                 <button onClick={() => { setEditingSchedule(s); setShowScheduleEditor(true) }} className="text-[10px] text-blue-500 hover:underline">Edit</button>
                 <button onClick={() => openCardGenerator(s)} className="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5"><ImageIcon size={9} /> Card</button>
+                <button onClick={() => openReconcile(s)} className="text-[10px] text-purple-500 hover:underline flex items-center gap-0.5"><RefreshCw size={9} /> Reconcile</button>
                 {s.status === 'archived' ? (
                   <button onClick={() => handleRestoreSchedule(s.id)} className="text-[10px] text-green-500 hover:underline">Restore</button>
                 ) : (
@@ -503,6 +535,71 @@ function AdminRegistrationsPage() {
           communityColors={cardCommunityColors}
           onClose={() => { setCardSchedule(null); setCardCommunityColors([]) }}
         />
+      )}
+
+      {reconcileSchedule && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setReconcileSchedule(null)}>
+          <div className="bg-[rgb(var(--surface))] rounded-2xl border border-[rgb(var(--border-soft))] w-full max-w-2xl max-h-[85vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-bold text-lg flex items-center gap-2"><RefreshCw size={18} /> Reconcile Amounts</h3>
+              <button onClick={() => setReconcileSchedule(null)}><X size={18} /></button>
+            </div>
+            <p className="text-sm text-[rgb(var(--muted-fg))] mb-4">
+              {reconcileSchedule.name} — sets each registration's amount to the current price ({reconcileSchedule.pricePerPlayer?.toFixed(2) ?? '0.00'} × headcount).
+            </p>
+
+            {reconcilePreview === null ? (
+              <p className="text-sm text-[rgb(var(--muted-fg))]">Checking…</p>
+            ) : reconcilePreview.length === 0 ? (
+              <div className="rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-6 text-center">
+                <p className="text-sm font-bold text-green-600">Everything already matches.</p>
+                <p className="text-xs text-[rgb(var(--muted-fg))] mt-1">No registrations on this schedule have a mismatched amount.</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs font-bold text-[rgb(var(--muted-fg))] mb-2">{reconcilePreview.length} registration{reconcilePreview.length === 1 ? '' : 's'} will change:</p>
+                <div className="rounded-xl border border-[rgb(var(--border-soft))] overflow-hidden mb-4">
+                  <table className="w-full text-xs">
+                    <thead><tr className="bg-[rgb(var(--surface-hover))] text-left">
+                      <th className="px-3 py-2">Name</th><th className="px-3 py-2">Type</th>
+                      <th className="px-3 py-2">Heads</th><th className="px-3 py-2">Current</th>
+                      <th className="px-3 py-2">New</th><th className="px-3 py-2">Status</th>
+                    </tr></thead>
+                    <tbody className="divide-y divide-[rgb(var(--border-soft))]">
+                      {reconcilePreview.map((p) => (
+                        <tr key={p.id}>
+                          <td className="px-3 py-1.5">{p.name || '—'}</td>
+                          <td className="px-3 py-1.5">{p.regType}</td>
+                          <td className="px-3 py-1.5">{p.headcount}</td>
+                          <td className="px-3 py-1.5 text-red-500">{p.currentAmountDue.toFixed(2)}</td>
+                          <td className="px-3 py-1.5 text-green-600 font-bold">{p.newAmountDue.toFixed(2)}</td>
+                          <td className="px-3 py-1.5 text-[rgb(var(--muted-fg))]">{p.currentStatus}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <label className="flex items-start gap-2 mb-4 cursor-pointer">
+                  <input type="checkbox" checked={reconcileMarkPaid} onChange={(e) => setReconcileMarkPaid(e.target.checked)} className="mt-0.5" />
+                  <span className="text-xs">
+                    <span className="font-bold">Also mark these as fully paid.</span>
+                    <span className="text-[rgb(var(--muted-fg))]"> Leave unchecked to only fix the amounts (payment status stays based on what's actually been paid — unpaid registrations stay unpaid).</span>
+                  </span>
+                </label>
+
+                <div className="flex gap-2">
+                  <button onClick={applyReconcile} disabled={reconcileBusy}
+                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white rounded-xl py-2.5 text-sm font-bold disabled:opacity-50">
+                    {reconcileBusy ? 'Applying…' : `Apply to ${reconcilePreview.length}`}
+                  </button>
+                  <button onClick={() => setReconcileSchedule(null)}
+                    className="px-4 rounded-xl border border-[rgb(var(--border-soft))] text-sm font-bold">Cancel</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
