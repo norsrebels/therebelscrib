@@ -125,6 +125,31 @@ export const getExecutiveDashboard = createServerFn({ method: 'GET' }).handler(a
       return r.rows as any[]
     }, [])
 
+    // ─── Expenses: total + by category + by month (for Net = Revenue − Expenses) ─
+    const expenseTotal = await safe(async () => {
+      const r = await db.execute(sql`SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM schedule_expenses`)
+      return Number((r.rows[0] as any)?.total ?? 0)
+    }, 0)
+
+    const expenseByCategory = await safe(async () => {
+      const r = await db.execute(sql`
+        SELECT category, COALESCE(SUM(amount), 0)::numeric AS total
+        FROM schedule_expenses GROUP BY category ORDER BY total DESC
+      `)
+      return r.rows as any[]
+    }, [])
+
+    const expenseByMonth = await safe(async () => {
+      const r = await db.execute(sql`
+        SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
+               COALESCE(SUM(amount), 0)::numeric AS total
+        FROM schedule_expenses
+        WHERE created_at >= now() - interval '12 months'
+        GROUP BY 1 ORDER BY 1
+      `)
+      return r.rows as any[]
+    }, [])
+
     const expected = Number(finance.expected ?? 0)
     const collected = Number(finance.collected ?? 0)
 
@@ -151,7 +176,14 @@ export const getExecutiveDashboard = createServerFn({ method: 'GET' }).handler(a
         paidCount: Number(finance.paid_count ?? 0),
         partialCount: Number(finance.partial_count ?? 0),
         unpaidCount: Number(finance.unpaid_count ?? 0),
+        expenses: expenseTotal,
+        // Net uses COLLECTED (actual cash in) minus expenses — true profit on hand.
+        // netExpected uses expected revenue, for a forward-looking view.
+        net: Number((collected - expenseTotal).toFixed(2)),
+        netExpected: Number((expected - expenseTotal).toFixed(2)),
       },
+      expenseByCategory: expenseByCategory.map((e) => ({ category: e.category, total: Number(e.total) })),
+      expenseByMonth: expenseByMonth.map((e) => ({ month: e.month, total: Number(e.total) })),
       revenueByMonth: revenueByMonth.map((m) => ({
         month: m.month,
         expected: Number(m.expected),
