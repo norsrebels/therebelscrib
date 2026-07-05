@@ -2391,6 +2391,7 @@ function SettingsTab({
   const [localSettings, setLocalSettings] = useState(state.settings);
   const [isSaved, setIsSaved] = useState(false);
   const [showCardGenerator, setShowCardGenerator] = useState(false);
+  const [showChampionsCard, setShowChampionsCard] = useState(false);
 
   // Update local state if parent state changes (e.g. on initial load or remote sync)
   useEffect(() => {
@@ -2622,6 +2623,12 @@ function SettingsTab({
           >
             <ImageIcon size={16} /> Generate Schedule Card (JPG)
           </button>
+          <button
+            onClick={() => setShowChampionsCard(true)}
+            className="w-full flex items-center justify-center gap-3 bg-yellow-500 hover:bg-yellow-600 text-black rounded-xl py-3 text-sm font-bold transition-colors"
+          >
+            <Trophy size={16} /> Generate Champions Card (JPG)
+          </button>
         </div>
       </div>
 
@@ -2635,11 +2642,20 @@ function SettingsTab({
           onClose={() => setShowCardGenerator(false)}
         />
       )}
+
+      {showChampionsCard && (
+        <ChampionsCardGenerator
+          tournamentName={state.settings.scheduleName}
+          defaultDate={state.settings.date}
+          onClose={() => setShowChampionsCard(false)}
+        />
+      )}
     </div>
   );
 }
 
 import { ScheduleCardGenerator } from "@/components/ScheduleCardGenerator";
+import { ChampionsCardGenerator } from "@/components/ChampionsCardGenerator";
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
