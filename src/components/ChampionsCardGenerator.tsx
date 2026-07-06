@@ -12,6 +12,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { X, Download, Trophy, Plus, Trash2, Palette, Images, Upload, Type, LayoutGrid } from 'lucide-react'
 import { getGalleryImages, type GalleryImage } from '@/server/gallery.functions'
+import { getChampionPresets, saveChampionPreset, deleteChampionPreset, type ChampionPreset } from '@/server/champion-presets.functions'
 import { FONT_OPTIONS, loadFont, fontFamily, type FontChoice } from '@/lib/schedule-card-fonts'
 
 const FORMATS: Record<string, { w: number; h: number; label: string }> = {
@@ -100,6 +101,53 @@ export function ChampionsCardGenerator({
 
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [showGallery, setShowGallery] = useState(false)
+  const [galleryTarget, setGalleryTarget] = useState<'photo' | 'logo'>('photo')
+
+  // Brand lockup: logo (optional) + org name, tied together. Plus a footer tagline.
+  const [brandName, setBrandName] = useState('The Rebels Volleyball')
+  const [showBrand, setShowBrand] = useState(true)
+  const [brandPlacement, setBrandPlacement] = useState<'topLeft' | 'topCenter' | 'topRight'>('topCenter')
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [footerText, setFooterText] = useState('On the court, Rebel your way')
+  const [showFooter, setShowFooter] = useState(true)
+  const logoImgRef = useRef<HTMLImageElement | null>(null)
+  const logoInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Saved pubmat presets (the LOOK, shared across admins). Applying a preset sets
+  // style + brand + footer + format, but never touches event content (winners/photos).
+  const [presets, setPresets] = useState<ChampionPreset[]>([])
+  const [presetName, setPresetName] = useState('')
+  const [presetMsg, setPresetMsg] = useState('')
+  useEffect(() => { getChampionPresets().then(setPresets).catch(() => {}) }, [])
+
+  const applyPreset = (p: ChampionPreset) => {
+    const c = p.config || {}
+    if (c.style) setStyle((s) => ({ ...s, ...c.style }))
+    if (typeof c.dimension === 'string') setDimension(c.dimension)
+    if (typeof c.brandName === 'string') setBrandName(c.brandName)
+    if (typeof c.showBrand === 'boolean') setShowBrand(c.showBrand)
+    if (c.brandPlacement) setBrandPlacement(c.brandPlacement)
+    if (typeof c.footerText === 'string') setFooterText(c.footerText)
+    if (typeof c.showFooter === 'boolean') setShowFooter(c.showFooter)
+  }
+
+  const handleSavePreset = async () => {
+    const name = presetName.trim()
+    if (!name) { setPresetMsg('Enter a preset name'); return }
+    try {
+      await saveChampionPreset({ data: { name, config: {
+        style, dimension, brandName, showBrand, brandPlacement, footerText, showFooter,
+      } } })
+      setPresetMsg(`Saved "${name}"`)
+      setPresetName('')
+      getChampionPresets().then(setPresets).catch(() => {})
+    } catch (e: any) { setPresetMsg(e?.message || 'Save failed') }
+  }
+
+  const handleDeletePreset = async (id: number) => {
+    try { await deleteChampionPreset({ data: { id } }); setPresets((prev) => prev.filter((p) => p.id !== id)) }
+    catch { /* non-fatal */ }
+  }
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([])
   const [generating, setGenerating] = useState(false)
   const [fontReady, setFontReady] = useState(0)
@@ -118,15 +166,19 @@ export function ChampionsCardGenerator({
   const updatePlacement = (id: string, field: keyof Placement, value: string | number) =>
     setPlacements((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)))
 
-  const openGallery = async () => {
+  const openGallery = async (target: 'photo' | 'logo') => {
+    setGalleryTarget(target)
     setShowGallery(true)
     try { setGalleryImages(await getGalleryImages()) } catch { setGalleryImages([]) }
   }
-  const selectPhoto = async (url: string) => {
+  const selectFromGallery = async (url: string) => {
     const img = await loadImage(url)
-    photoImgRef.current = img
-    setPhotoUrl(url)
-    if (style.photoMode === 'none') set('photoMode', 'insetRight')
+    if (galleryTarget === 'logo') {
+      logoImgRef.current = img; setLogoUrl(url)
+    } else {
+      photoImgRef.current = img; setPhotoUrl(url)
+      if (style.photoMode === 'none') set('photoMode', 'insetRight')
+    }
     setShowGallery(false)
     render()
   }
@@ -143,19 +195,32 @@ export function ChampionsCardGenerator({
     }
     reader.readAsDataURL(file)
   }
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const img = await loadImage(reader.result as string)
+      logoImgRef.current = img
+      setLogoUrl(reader.result as string)
+      render()
+    }
+    reader.readAsDataURL(file)
+  }
   const clearPhoto = () => { photoImgRef.current = null; setPhotoUrl(null); set('photoMode', 'none') }
+  const clearLogo = () => { logoImgRef.current = null; setLogoUrl(null) }
 
   const render = useCallback(() => {
     const cv = canvasRef.current
-    if (cv) drawCard(cv, { title, subtitle, placements, style, photoImg: photoImgRef.current }, dimension, 1)
-  }, [title, subtitle, placements, style, dimension, photoUrl, fontReady])
+    if (cv) drawCard(cv, { title, subtitle, placements, style, photoImg: photoImgRef.current, brand: { name: showBrand ? brandName : '', placement: brandPlacement, logo: logoImgRef.current }, footer: showFooter ? footerText : '' }, dimension, 1)
+  }, [title, subtitle, placements, style, dimension, photoUrl, fontReady, brandName, showBrand, brandPlacement, logoUrl, footerText, showFooter])
 
   useEffect(() => { render() }, [render])
 
   const handleDownload = () => {
     setGenerating(true)
     const target = document.createElement('canvas')
-    drawCard(target, { title, subtitle, placements, style, photoImg: photoImgRef.current }, dimension, 2)
+    drawCard(target, { title, subtitle, placements, style, photoImg: photoImgRef.current, brand: { name: showBrand ? brandName : '', placement: brandPlacement, logo: logoImgRef.current }, footer: showFooter ? footerText : '' }, dimension, 2)
     setTimeout(() => {
       target.toBlob((blob) => {
         if (!blob) { setGenerating(false); return }
@@ -197,6 +262,27 @@ export function ChampionsCardGenerator({
               <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Subtitle (date / division)</label>
               <input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="e.g. Spring Cup 2026"
                 className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-yellow-500" />
+            </div>
+
+            {/* Saved pubmat presets (club look) */}
+            <div className="rounded-lg border border-[rgb(var(--border-soft))] p-2.5 bg-[rgb(var(--bg))]">
+              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] flex items-center gap-1 mb-1.5"><Palette size={11} /> Saved looks</label>
+              {presets.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {presets.map((p) => (
+                    <span key={p.id} className="group inline-flex items-center gap-1 text-[10px] font-bold pl-2 pr-1.5 py-1 rounded-full border border-[rgb(var(--border-soft))]">
+                      <button onClick={() => applyPreset(p)} className="hover:text-yellow-600">{p.name}</button>
+                      <button onClick={() => handleDeletePreset(p.id)} className="opacity-40 hover:opacity-100" title="Delete preset">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-1.5">
+                <input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="Name this look…"
+                  className="flex-1 text-[11px] rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface))] px-2 py-1.5 focus:outline-none focus:border-yellow-500" />
+                <button onClick={handleSavePreset} className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-yellow-500 text-black hover:bg-yellow-600">Save look</button>
+              </div>
+              {presetMsg && <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1">{presetMsg}</p>}
             </div>
 
             {/* Title styling */}
@@ -251,7 +337,7 @@ export function ChampionsCardGenerator({
             <div>
               <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1 flex items-center gap-1"><Images size={11} /> Winner photo</label>
               <div className="flex gap-1.5 mb-2">
-                <button onClick={openGallery} className="flex-1 text-[11px] font-bold px-3 py-2 rounded-lg border border-[rgb(var(--border-soft))] hover:border-yellow-500 flex items-center justify-center gap-1"><Images size={12} /> Gallery</button>
+                <button onClick={() => openGallery('photo')} className="flex-1 text-[11px] font-bold px-3 py-2 rounded-lg border border-[rgb(var(--border-soft))] hover:border-yellow-500 flex items-center justify-center gap-1"><Images size={12} /> Gallery</button>
                 <button onClick={() => fileInputRef.current?.click()} className="flex-1 text-[11px] font-bold px-3 py-2 rounded-lg border border-[rgb(var(--border-soft))] hover:border-yellow-500 flex items-center justify-center gap-1"><Upload size={12} /> Upload</button>
                 {photoUrl && <button onClick={clearPhoto} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-[rgb(var(--border-soft))] text-red-500 hover:border-red-500">Remove</button>}
               </div>
@@ -263,6 +349,44 @@ export function ChampionsCardGenerator({
                     {PHOTO_MODES.filter((m) => m.key !== 'none').map((m) => <Seg key={m.key} active={style.photoMode === m.key} onClick={() => set('photoMode', m.key)}>{m.label}</Seg>)}
                   </div>
                 </>
+              )}
+            </div>
+
+            {/* Brand lockup: logo + org name, tied together */}
+            <div className="rounded-lg border border-[rgb(var(--border-soft))] p-2.5">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Brand lockup</label>
+                <Seg active={showBrand} onClick={() => setShowBrand(!showBrand)}>{showBrand ? 'On' : 'Off'}</Seg>
+              </div>
+              {showBrand && (
+                <>
+                  <input value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="Organization name"
+                    className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-2 py-1.5 mb-2 focus:outline-none focus:border-yellow-500" />
+                  <div className="flex gap-1.5 mb-2">
+                    <button onClick={() => openGallery('logo')} className="flex-1 text-[10px] font-bold px-2 py-1.5 rounded-lg border border-[rgb(var(--border-soft))] hover:border-yellow-500 flex items-center justify-center gap-1"><Images size={11} /> Logo: Gallery</button>
+                    <button onClick={() => logoInputRef.current?.click()} className="flex-1 text-[10px] font-bold px-2 py-1.5 rounded-lg border border-[rgb(var(--border-soft))] hover:border-yellow-500 flex items-center justify-center gap-1"><Upload size={11} /> Upload</button>
+                    {logoUrl && <button onClick={clearLogo} className="text-[10px] font-bold px-2 py-1.5 rounded-lg border border-[rgb(var(--border-soft))] text-red-500 hover:border-red-500">Clear</button>}
+                  </div>
+                  <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                  <div className="flex gap-1.5">
+                    <span className="text-[10px] text-[rgb(var(--muted-fg))] self-center">Place:</span>
+                    {(['topLeft', 'topCenter', 'topRight'] as const).map((pl) => (
+                      <Seg key={pl} active={brandPlacement === pl} onClick={() => setBrandPlacement(pl)}>{pl === 'topLeft' ? 'Left' : pl === 'topCenter' ? 'Center' : 'Right'}</Seg>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer tagline */}
+            <div className="rounded-lg border border-[rgb(var(--border-soft))] p-2.5">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Footer tagline</label>
+                <Seg active={showFooter} onClick={() => setShowFooter(!showFooter)}>{showFooter ? 'On' : 'Off'}</Seg>
+              </div>
+              {showFooter && (
+                <input value={footerText} onChange={(e) => setFooterText(e.target.value)} placeholder="Tagline / quote"
+                  className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-2 py-1.5 focus:outline-none focus:border-yellow-500" />
               )}
             </div>
 
@@ -315,7 +439,7 @@ export function ChampionsCardGenerator({
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {galleryImages.map((img) => (
-                  <button key={img.id} onClick={() => selectPhoto(img.url)} className="aspect-square rounded-lg overflow-hidden border border-[rgb(var(--border-soft))] hover:border-yellow-500 transition-colors">
+                  <button key={img.id} onClick={() => selectFromGallery(img.url)} className="aspect-square rounded-lg overflow-hidden border border-[rgb(var(--border-soft))] hover:border-yellow-500 transition-colors">
                     <img src={img.url} alt="" className="w-full h-full object-cover" />
                   </button>
                 ))}
@@ -346,7 +470,8 @@ function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: numb
 }
 
 // ─── Canvas rendering ────────────────────────────────────────────────────────
-interface CardData { title: string; subtitle: string; placements: Placement[]; style: Style; photoImg: HTMLImageElement | null }
+interface Brand { name: string; placement: 'topLeft' | 'topCenter' | 'topRight'; logo: HTMLImageElement | null }
+interface CardData { title: string; subtitle: string; placements: Placement[]; style: Style; photoImg: HTMLImageElement | null; brand: Brand; footer: string }
 interface Rect { x: number; y: number; w: number; h: number }
 
 function drawCard(canvas: HTMLCanvasElement, data: CardData, dimension: string, scale: number) {
@@ -381,6 +506,15 @@ function drawCard(canvas: HTMLCanvasElement, data: CardData, dimension: string, 
   const textCol = lightText ? '#1a1d24' : '#ffffff'
   const subCol = lightText ? 'rgba(26,29,36,0.65)' : 'rgba(255,255,255,0.72)'
 
+  // Reserve top space for a top-center brand lockup so it doesn't overlap the trophy.
+  const brandH = data.brand.name || data.brand.logo ? U * 70 : 0
+  if (data.brand.placement === 'topCenter' && brandH > 0 && s.photoMode !== 'top') {
+    content = { ...content, y: content.y + brandH, h: content.h - brandH }
+  }
+  // Reserve bottom space for the footer tagline.
+  const footerH = data.footer ? U * 56 : 0
+  if (footerH > 0) content = { ...content, h: content.h - footerH }
+
   // ── Header zone: trophy + title + subtitle, within content rect ──
   const cx = content.x + content.w / 2
   const alignX = s.titleAlign === 'left' ? content.x : s.titleAlign === 'right' ? content.x + content.w : cx
@@ -413,9 +547,51 @@ function drawCard(canvas: HTMLCanvasElement, data: CardData, dimension: string, 
   const rowH = Math.min((zoneBottom - zoneTop) / Math.max(sorted.length, 1), U * 175)
   sorted.forEach((p, i) => drawPlacementRow(ctx, content.x, content.w, zoneTop + i * rowH, rowH, p, U, fam, lightText))
 
+  // ── Brand lockup (logo + org name), tied together ──
+  drawBrand(ctx, W, margin, U, fam, data.brand, textCol, s.accent)
+
+  // ── Footer tagline, centered above the accent line ──
+  if (data.footer) {
+    ctx.textAlign = 'center'
+    ctx.fillStyle = s.accent
+    ctx.font = `italic 700 ${U * 26}px ${fam}`
+    ctx.fillText(data.footer, W / 2, H - U * 34)
+  }
+
   // Footer accent line.
   ctx.fillStyle = s.accent
   ctx.fillRect(0, H - U * 10, W, U * 10)
+}
+
+// Draws the logo + org name lockup at the chosen top placement.
+function drawBrand(ctx: CanvasRenderingContext2D, W: number, margin: number, U: number, fam: string, brand: Brand, textCol: string, accent: string) {
+  if (!brand.name && !brand.logo) return
+  const pad = Math.max(margin, U * 30)
+  const logoS = U * 54
+  ctx.font = `800 ${U * 26}px ${fam}`
+  const nameW = brand.name ? ctx.measureText(brand.name).width : 0
+  const lockW = (brand.logo ? logoS + U * 12 : 0) + nameW
+  const cy = pad + logoS / 2
+
+  let startX: number
+  if (brand.placement === 'topLeft') startX = pad
+  else if (brand.placement === 'topRight') startX = W - pad - lockW
+  else startX = (W - lockW) / 2
+
+  let x = startX
+  if (brand.logo) {
+    const r = logoS / 2
+    ctx.save(); ctx.beginPath(); ctx.arc(x + r, cy, r, 0, Math.PI * 2); ctx.clip()
+    drawCover(ctx, brand.logo, x, cy - r, logoS, logoS); ctx.restore()
+    ctx.beginPath(); ctx.arc(x + r, cy, r, 0, Math.PI * 2); ctx.lineWidth = U * 2.5; ctx.strokeStyle = accent; ctx.stroke()
+    x += logoS + U * 12
+  }
+  if (brand.name) {
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+    ctx.fillStyle = textCol; ctx.font = `800 ${U * 26}px ${fam}`
+    ctx.fillText(brand.name, x, cy)
+    ctx.textBaseline = 'alphabetic'
+  }
 }
 
 // Places the photo per mode and RETURNS the remaining content rect.
