@@ -9,7 +9,29 @@
 // automatically (gold/silver/bronze), so meaning and design stay in sync.
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Download, Trophy, Plus, Trash2, Palette } from 'lucide-react'
+import { X, Download, Trophy, Plus, Trash2, Palette, Images, Upload } from 'lucide-react'
+import { getGalleryImages, type GalleryImage } from '@/server/gallery.functions'
+
+// Same image loading approach as the schedule card (crossOrigin for clean canvas
+// export — confirmed working with the gallery's CORS headers).
+function loadImage(src: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new window.Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = () => resolve(null)
+    img.src = src
+  })
+}
+
+function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+  const imgRatio = img.width / img.height
+  const boxRatio = w / h
+  let sx = 0, sy = 0, sw = img.width, sh = img.height
+  if (imgRatio > boxRatio) { sw = img.height * boxRatio; sx = (img.width - sw) / 2 }
+  else { sh = img.width / boxRatio; sy = (img.height - sh) / 2 }
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h)
+}
 
 const FORMATS: Record<string, { w: number; h: number; label: string }> = {
   portrait: { w: 1080, h: 1350, label: 'Portrait 4:5' },
@@ -17,11 +39,14 @@ const FORMATS: Record<string, { w: number; h: number; label: string }> = {
   story: { w: 1080, h: 1920, label: 'Story 9:16' },
 }
 
-type ThemeKey = 'podiumGold' | 'spotlight' | 'laurel'
+type ThemeKey = 'podiumGold' | 'spotlight' | 'laurel' | 'midnightCourt' | 'emberBlaze' | 'cleanSlate'
 const THEMES: { key: ThemeKey; label: string }[] = [
   { key: 'podiumGold', label: 'Podium Gold' },
   { key: 'spotlight', label: 'Champion Spotlight' },
   { key: 'laurel', label: 'Classic Laurel' },
+  { key: 'midnightCourt', label: 'Midnight Court' },
+  { key: 'emberBlaze', label: 'Ember Blaze' },
+  { key: 'cleanSlate', label: 'Clean Slate' },
 ]
 
 // Rank → medal color. Beyond 3rd falls back to a neutral platinum.
@@ -60,6 +85,43 @@ export function ChampionsCardGenerator({
   const [placements, setPlacements] = useState<Placement[]>([
     { id: 'p1', rank: 1, name: '', detail: '' },
   ])
+  // Photo support: source URL + placement mode ('none' | 'background' | 'badge').
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
+  const [photoMode, setPhotoMode] = useState<'none' | 'background' | 'badge'>('none')
+  const [showGallery, setShowGallery] = useState(false)
+  const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const photoImgRef = useRef<HTMLImageElement | null>(null)
+
+  const openGallery = async () => {
+    setShowGallery(true)
+    try { setGalleryImages(await getGalleryImages()) } catch { setGalleryImages([]) }
+  }
+
+  const selectPhoto = async (url: string) => {
+    const img = await loadImage(url)
+    photoImgRef.current = img
+    setPhotoUrl(url)
+    if (photoMode === 'none') setPhotoMode('background')
+    setShowGallery(false)
+    render()
+  }
+
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const img = await loadImage(reader.result as string)
+      photoImgRef.current = img
+      setPhotoUrl(reader.result as string)
+      if (photoMode === 'none') setPhotoMode('background')
+      render()
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const clearPhoto = () => { photoImgRef.current = null; setPhotoUrl(null); setPhotoMode('none') }
   const [generating, setGenerating] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -73,15 +135,15 @@ export function ChampionsCardGenerator({
 
   const render = useCallback(() => {
     const cv = canvasRef.current
-    if (cv) drawChampionsCard(cv, { title, subtitle, theme, accent, placements }, dimension, 1)
-  }, [title, subtitle, theme, accent, placements, dimension])
+    if (cv) drawChampionsCard(cv, { title, subtitle, theme, accent, placements, photoMode, photoImg: photoImgRef.current }, dimension, 1)
+  }, [title, subtitle, theme, accent, placements, dimension, photoMode, photoUrl])
 
   useEffect(() => { render() }, [render])
 
   const handleDownload = () => {
     setGenerating(true)
     const target = document.createElement('canvas')
-    drawChampionsCard(target, { title, subtitle, theme, accent, placements }, dimension, 2)
+    drawChampionsCard(target, { title, subtitle, theme, accent, placements, photoMode, photoImg: photoImgRef.current }, dimension, 2)
     setTimeout(() => {
       target.toBlob((blob) => {
         if (!blob) { setGenerating(false); return }
@@ -175,6 +237,26 @@ export function ChampionsCardGenerator({
             </div>
 
             <div>
+              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Photo (optional)</label>
+              <div className="flex gap-1.5 mb-2">
+                <button onClick={openGallery} className="flex-1 text-[11px] font-bold px-3 py-2 rounded-lg border border-[rgb(var(--border-soft))] hover:border-yellow-500 flex items-center justify-center gap-1"><Images size={12} /> Gallery</button>
+                <button onClick={() => fileInputRef.current?.click()} className="flex-1 text-[11px] font-bold px-3 py-2 rounded-lg border border-[rgb(var(--border-soft))] hover:border-yellow-500 flex items-center justify-center gap-1"><Upload size={12} /> Upload</button>
+                {photoUrl && <button onClick={clearPhoto} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-[rgb(var(--border-soft))] text-red-500 hover:border-red-500">Remove</button>}
+              </div>
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} className="hidden" />
+              {photoUrl && (
+                <div className="flex gap-1.5">
+                  {(['background', 'badge'] as const).map((m) => (
+                    <button key={m} onClick={() => setPhotoMode(m)}
+                      className={`flex-1 text-[11px] font-bold px-3 py-1.5 rounded-lg border transition-colors capitalize ${photoMode === m ? 'border-yellow-500 bg-yellow-500/10 text-yellow-600' : 'border-[rgb(var(--border-soft))]'}`}>
+                      {m === 'background' ? 'Background' : 'Team badge'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
               <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Accent color</label>
               <div className="flex items-center gap-2">
                 <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)}
@@ -197,13 +279,35 @@ export function ChampionsCardGenerator({
           </div>
         </div>
       </div>
+
+      {showGallery && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowGallery(false)}>
+          <div className="bg-[rgb(var(--surface))] rounded-2xl border border-[rgb(var(--border-soft))] w-full max-w-2xl max-h-[80vh] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-bold flex items-center gap-2"><Images size={16} /> Choose from Gallery</h4>
+              <button onClick={() => setShowGallery(false)}><X size={18} /></button>
+            </div>
+            {galleryImages.length === 0 ? (
+              <p className="text-sm text-[rgb(var(--muted-fg))] text-center py-8">No gallery images found.</p>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {galleryImages.map((img) => (
+                  <button key={img.id} onClick={() => selectPhoto(img.url)} className="aspect-square rounded-lg overflow-hidden border border-[rgb(var(--border-soft))] hover:border-yellow-500 transition-colors">
+                    <img src={img.url} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 // ─── Canvas rendering ────────────────────────────────────────────────────────
 
-interface CardData { title: string; subtitle: string; theme: ThemeKey; accent: string; placements: Placement[] }
+interface CardData { title: string; subtitle: string; theme: ThemeKey; accent: string; placements: Placement[]; photoMode: 'none' | 'background' | 'badge'; photoImg: HTMLImageElement | null }
 
 function drawChampionsCard(canvas: HTMLCanvasElement, data: CardData, dimension: string, scale: number) {
   const fmt = FORMATS[dimension] ?? FORMATS.portrait
@@ -218,27 +322,60 @@ function drawChampionsCard(canvas: HTMLCanvasElement, data: CardData, dimension:
   // Background per theme.
   paintBackground(ctx, W, H, data.theme, data.accent)
 
+  // Background photo (full-bleed) with a dark gradient overlay for legibility.
+  if (data.photoMode === 'background' && data.photoImg) {
+    ctx.globalAlpha = 0.55
+    drawCover(ctx, data.photoImg, 0, 0, W, H)
+    ctx.globalAlpha = 1
+    const ov = ctx.createLinearGradient(0, 0, 0, H)
+    ov.addColorStop(0, 'rgba(10,8,4,0.78)')
+    ov.addColorStop(0.5, 'rgba(14,12,7,0.55)')
+    ov.addColorStop(1, 'rgba(10,8,4,0.85)')
+    ctx.fillStyle = ov; ctx.fillRect(0, 0, W, H)
+  }
+
   // Header: trophy motif + title.
   const cx = W / 2
   drawTrophy(ctx, cx, H * 0.13, U * 70, data.accent)
 
+  // Text color adapts to theme: dark on light themes, unless a background photo
+  // (which always has a dark overlay) forces white for legibility.
+  const lightText = !isLightTheme(data.theme) || data.photoMode === 'background'
+  const titleColor = lightText ? '#ffffff' : '#1a1d24'
+  const subColor = lightText ? 'rgba(255,255,255,0.7)' : 'rgba(26,29,36,0.65)'
+
   ctx.textAlign = 'center'
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = titleColor
   ctx.font = `800 ${U * 58}px system-ui, sans-serif`
   wrapText(ctx, (data.title || 'Champions').toUpperCase(), cx, H * 0.24, W * 0.86, U * 64)
 
   if (data.subtitle) {
-    ctx.fillStyle = 'rgba(255,255,255,0.7)'
+    ctx.fillStyle = subColor
     ctx.font = `600 ${U * 26}px system-ui, sans-serif`
     ctx.fillText(data.subtitle, cx, H * 0.29)
   }
 
+  // Optional circular team badge photo, centered under the subtitle.
+  let placementTop = H * 0.37
+  if (data.photoMode === 'badge' && data.photoImg) {
+    const br = U * 95
+    const by = H * 0.37
+    ctx.save()
+    ctx.beginPath(); ctx.arc(cx, by, br, 0, Math.PI * 2); ctx.closePath(); ctx.clip()
+    drawCover(ctx, data.photoImg, cx - br, by - br, br * 2, br * 2)
+    ctx.restore()
+    // Gold ring around the badge.
+    ctx.beginPath(); ctx.arc(cx, by, br, 0, Math.PI * 2)
+    ctx.lineWidth = U * 6; ctx.strokeStyle = data.accent; ctx.stroke()
+    placementTop = by + br + U * 30
+  }
+
   // Placements — sorted by rank, drawn as medallion rows.
   const sorted = [...data.placements].sort((a, b) => a.rank - b.rank)
-  const startY = H * 0.37
-  const rowH = Math.min((H * 0.5) / Math.max(sorted.length, 1), U * 190)
+  const availableH = (H - U * 40) - placementTop
+  const rowH = Math.min(availableH / Math.max(sorted.length, 1), U * 190)
   sorted.forEach((p, i) => {
-    drawPlacementRow(ctx, W, startY + i * rowH, rowH, p, U)
+    drawPlacementRow(ctx, W, placementTop + i * rowH, rowH, p, U, lightText)
   })
 
   // Footer accent line.
@@ -251,9 +388,43 @@ function paintBackground(ctx: CanvasRenderingContext2D, W: number, H: number, th
     const g = ctx.createRadialGradient(W / 2, H * 0.32, 0, W / 2, H * 0.32, H * 0.7)
     g.addColorStop(0, '#2a2140'); g.addColorStop(1, '#0d0a17')
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+    // Radiating light rays behind the champion for drama.
+    ctx.save(); ctx.translate(W / 2, H * 0.32); ctx.globalAlpha = 0.06
+    for (let i = 0; i < 12; i++) {
+      ctx.rotate((Math.PI * 2) / 12)
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-W * 0.05, H); ctx.lineTo(W * 0.05, H); ctx.closePath()
+      ctx.fillStyle = accent; ctx.fill()
+    }
+    ctx.restore()
   } else if (theme === 'laurel') {
     ctx.fillStyle = '#101418'; ctx.fillRect(0, 0, W, H)
     drawLaurel(ctx, W / 2, H * 0.5, Math.min(W, H) * 0.42, accent)
+  } else if (theme === 'midnightCourt') {
+    // Deep navy with a subtle volleyball-net grid — sporty and modern.
+    const g = ctx.createLinearGradient(0, 0, 0, H)
+    g.addColorStop(0, '#0a1428'); g.addColorStop(1, '#060b18')
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = Math.max(1, W / 600)
+    const step = W / 16
+    for (let x = 0; x <= W; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke() }
+    for (let y = 0; y <= H; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke() }
+    const gv = ctx.createRadialGradient(W / 2, H * 0.15, 0, W / 2, H * 0.15, H * 0.55)
+    gv.addColorStop(0, hexA(accent, 0.14)); gv.addColorStop(1, hexA(accent, 0))
+    ctx.fillStyle = gv; ctx.fillRect(0, 0, W, H)
+  } else if (theme === 'emberBlaze') {
+    // Warm red-orange energy gradient — bold, celebratory.
+    const g = ctx.createLinearGradient(0, 0, W, H)
+    g.addColorStop(0, '#2a0a06'); g.addColorStop(0.55, '#4a1208'); g.addColorStop(1, '#1a0603')
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+    const gv = ctx.createRadialGradient(W / 2, H * 0.18, 0, W / 2, H * 0.18, H * 0.6)
+    gv.addColorStop(0, 'rgba(255,120,40,0.22)'); gv.addColorStop(1, 'rgba(255,120,40,0)')
+    ctx.fillStyle = gv; ctx.fillRect(0, 0, W, H)
+  } else if (theme === 'cleanSlate') {
+    // Light, minimal, print-friendly — for formal certificates / posters.
+    ctx.fillStyle = '#f6f7f9'; ctx.fillRect(0, 0, W, H)
+    ctx.fillStyle = hexA(accent, 0.08); ctx.fillRect(0, 0, W, H * 0.32)
+    ctx.strokeStyle = hexA(accent, 0.5); ctx.lineWidth = Math.max(2, W / 240)
+    ctx.strokeRect(W * 0.04, H * 0.04, W * 0.92, H * 0.92)
   } else {
     // Podium Gold: deep charcoal with a subtle gold vignette.
     const g = ctx.createLinearGradient(0, 0, 0, H)
@@ -265,7 +436,21 @@ function paintBackground(ctx: CanvasRenderingContext2D, W: number, H: number, th
   }
 }
 
-function drawPlacementRow(ctx: CanvasRenderingContext2D, W: number, y: number, h: number, p: Placement, U: number) {
+// Hex + alpha → rgba string (for theme tints from any accent).
+function hexA(hex: string, a: number): string {
+  const h = hex.replace('#', '')
+  const r = parseInt(h.substring(0, 2), 16) || 0
+  const g = parseInt(h.substring(2, 4), 16) || 0
+  const b = parseInt(h.substring(4, 6), 16) || 0
+  return `rgba(${r},${g},${b},${a})`
+}
+
+// Themes where text should be DARK (light backgrounds).
+function isLightTheme(theme: ThemeKey): boolean {
+  return theme === 'cleanSlate'
+}
+
+function drawPlacementRow(ctx: CanvasRenderingContext2D, W: number, y: number, h: number, p: Placement, U: number, lightText: boolean) {
   const rc = rankColor(p.rank)
   const medR = Math.min(h * 0.32, U * 52)
   // Medallion.
@@ -285,11 +470,11 @@ function drawPlacementRow(ctx: CanvasRenderingContext2D, W: number, y: number, h
   ctx.fillStyle = rc.main
   ctx.font = `800 ${U * 22}px system-ui, sans-serif`
   ctx.fillText(rc.label, tx, my - U * 22)
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = lightText ? '#ffffff' : '#1a1d24'
   ctx.font = `800 ${U * 40}px system-ui, sans-serif`
   ctx.fillText(truncate(ctx, p.name || '—', W * 0.6), tx, my + U * 10)
   if (p.detail) {
-    ctx.fillStyle = 'rgba(255,255,255,0.6)'
+    ctx.fillStyle = lightText ? 'rgba(255,255,255,0.6)' : 'rgba(26,29,36,0.55)'
     ctx.font = `500 ${U * 22}px system-ui, sans-serif`
     ctx.fillText(truncate(ctx, p.detail, W * 0.6), tx, my + U * 42)
   }
