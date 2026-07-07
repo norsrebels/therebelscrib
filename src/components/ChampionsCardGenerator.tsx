@@ -10,9 +10,10 @@
 // system (principle 1 — one image source, one font system).
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Download, Trophy, Plus, Trash2, Palette, Images, Upload, Type, LayoutGrid } from 'lucide-react'
+import { X, Download, Trophy, Plus, Trash2, Palette, Images, Upload, Type, LayoutGrid, Shapes } from 'lucide-react'
 import { getGalleryImages, type GalleryImage } from '@/server/gallery.functions'
 import { getChampionPresets, saveChampionPreset, deleteChampionPreset, type ChampionPreset } from '@/server/champion-presets.functions'
+import { GRAPHICS, getGraphic, type GraphicKey } from '@/lib/champion-graphics'
 import { FONT_OPTIONS, loadFont, fontFamily, type FontChoice } from '@/lib/schedule-card-fonts'
 
 const FORMATS: Record<string, { w: number; h: number; label: string }> = {
@@ -57,6 +58,9 @@ function rankColor(rank: number): { main: string; glow: string; label: string } 
 }
 
 interface Placement { id: string; rank: number; name: string; detail: string }
+
+// A placed graphic. Position/size are % of canvas so preview (1x) and export (2x) match.
+interface Sticker { id: string; graphic: GraphicKey; xPct: number; yPct: number; sizePct: number; rot: number }
 
 interface Style {
   theme: ThemeKey
@@ -113,6 +117,53 @@ export function ChampionsCardGenerator({
   const logoImgRef = useRef<HTMLImageElement | null>(null)
   const logoInputRef = useRef<HTMLInputElement | null>(null)
 
+  // Stickers: draggable volleyball graphics layered on the card.
+  const [stickers, setStickers] = useState<Sticker[]>([])
+  const [selectedSticker, setSelectedSticker] = useState<string | null>(null)
+  const previewWrapRef = useRef<HTMLDivElement | null>(null)
+  const dragState = useRef<{ id: string; mode: 'move' | 'resize'; startX: number; startY: number; ox: number; oy: number; os: number } | null>(null)
+
+  const addSticker = (graphic: GraphicKey) => {
+    const id = `s${Date.now()}`
+    setStickers((prev) => [...prev, { id, graphic, xPct: 50, yPct: 50, sizePct: 22, rot: 0 }])
+    setSelectedSticker(id)
+  }
+  const removeSticker = (id: string) => {
+    setStickers((prev) => prev.filter((s) => s.id !== id))
+    if (selectedSticker === id) setSelectedSticker(null)
+  }
+  const updateSticker = (id: string, patch: Partial<Sticker>) =>
+    setStickers((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
+
+  const onStickerPointerDown = (e: React.PointerEvent, id: string, mode: 'move' | 'resize') => {
+    e.preventDefault(); e.stopPropagation()
+    setSelectedSticker(id)
+    const st = stickers.find((s) => s.id === id)!
+    dragState.current = { id, mode, startX: e.clientX, startY: e.clientY, ox: st.xPct, oy: st.yPct, os: st.sizePct }
+    ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
+  }
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      const d = dragState.current
+      if (!d) return
+      const wrap = previewWrapRef.current
+      if (!wrap) return
+      const r = wrap.getBoundingClientRect()
+      if (d.mode === 'move') {
+        const dx = ((e.clientX - d.startX) / r.width) * 100
+        const dy = ((e.clientY - d.startY) / r.height) * 100
+        updateSticker(d.id, { xPct: clamp(d.ox + dx, 0, 100), yPct: clamp(d.oy + dy, 0, 100) })
+      } else {
+        const dPx = (e.clientX - d.startX)
+        updateSticker(d.id, { sizePct: clamp(d.os + (dPx / r.width) * 100, 5, 70) })
+      }
+    }
+    const up = () => { dragState.current = null }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+  }, [stickers])
+
   // Saved pubmat presets (the LOOK, shared across admins). Applying a preset sets
   // style + brand + footer + format, but never touches event content (winners/photos).
   const [presets, setPresets] = useState<ChampionPreset[]>([])
@@ -129,6 +180,7 @@ export function ChampionsCardGenerator({
     if (c.brandPlacement) setBrandPlacement(c.brandPlacement)
     if (typeof c.footerText === 'string') setFooterText(c.footerText)
     if (typeof c.showFooter === 'boolean') setShowFooter(c.showFooter)
+    if (Array.isArray(c.stickers)) { setStickers(c.stickers); setSelectedSticker(null) }
   }
 
   const handleSavePreset = async () => {
@@ -136,7 +188,7 @@ export function ChampionsCardGenerator({
     if (!name) { setPresetMsg('Enter a preset name'); return }
     try {
       await saveChampionPreset({ data: { name, config: {
-        style, dimension, brandName, showBrand, brandPlacement, footerText, showFooter,
+        style, dimension, brandName, showBrand, brandPlacement, footerText, showFooter, stickers,
       } } })
       setPresetMsg(`Saved "${name}"`)
       setPresetName('')
@@ -212,15 +264,15 @@ export function ChampionsCardGenerator({
 
   const render = useCallback(() => {
     const cv = canvasRef.current
-    if (cv) drawCard(cv, { title, subtitle, placements, style, photoImg: photoImgRef.current, brand: { name: showBrand ? brandName : '', placement: brandPlacement, logo: logoImgRef.current }, footer: showFooter ? footerText : '' }, dimension, 1)
-  }, [title, subtitle, placements, style, dimension, photoUrl, fontReady, brandName, showBrand, brandPlacement, logoUrl, footerText, showFooter])
+    if (cv) drawCard(cv, { title, subtitle, placements, style, photoImg: photoImgRef.current, brand: { name: showBrand ? brandName : '', placement: brandPlacement, logo: logoImgRef.current }, footer: showFooter ? footerText : '', stickers }, dimension, 1)
+  }, [title, subtitle, placements, style, dimension, photoUrl, fontReady, brandName, showBrand, brandPlacement, logoUrl, footerText, showFooter, stickers])
 
   useEffect(() => { render() }, [render])
 
   const handleDownload = () => {
     setGenerating(true)
     const target = document.createElement('canvas')
-    drawCard(target, { title, subtitle, placements, style, photoImg: photoImgRef.current, brand: { name: showBrand ? brandName : '', placement: brandPlacement, logo: logoImgRef.current }, footer: showFooter ? footerText : '' }, dimension, 2)
+    drawCard(target, { title, subtitle, placements, style, photoImg: photoImgRef.current, brand: { name: showBrand ? brandName : '', placement: brandPlacement, logo: logoImgRef.current }, footer: showFooter ? footerText : '', stickers }, dimension, 2)
     setTimeout(() => {
       target.toBlob((blob) => {
         if (!blob) { setGenerating(false); return }
@@ -248,7 +300,33 @@ export function ChampionsCardGenerator({
         <div className="grid md:grid-cols-2 gap-4 p-4">
           {/* Preview */}
           <div className="flex items-start justify-center md:sticky md:top-20 self-start">
-            <canvas ref={canvasRef} className="w-full max-w-[380px] rounded-xl border border-[rgb(var(--border-soft))]" />
+            <div ref={previewWrapRef} className="relative w-full max-w-[380px]" onPointerDown={() => setSelectedSticker(null)}>
+              <canvas ref={canvasRef} className="w-full rounded-xl border border-[rgb(var(--border-soft))] block" />
+              {stickers.map((st) => {
+                const sel = selectedSticker === st.id
+                return (
+                  <div key={st.id}
+                    onPointerDown={(e) => onStickerPointerDown(e, st.id, 'move')}
+                    className="absolute cursor-move touch-none"
+                    style={{
+                      left: `${st.xPct}%`, top: `${st.yPct}%`, width: `${st.sizePct}%`,
+                      transform: `translate(-50%,-50%) rotate(${st.rot}deg)`, aspectRatio: '1',
+                      outline: sel ? '2px dashed rgba(245,197,24,0.9)' : 'none', outlineOffset: 2,
+                    }}>
+                    {/* transparent hit area over the drawn graphic */}
+                    <div className="w-full h-full" />
+                    {sel && (
+                      <>
+                        <button onPointerDown={(e) => { e.stopPropagation(); removeSticker(st.id) }}
+                          className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center shadow">×</button>
+                        <div onPointerDown={(e) => onStickerPointerDown(e, st.id, 'resize')}
+                          className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-yellow-500 border-2 border-white cursor-nwse-resize touch-none shadow" title="Resize" />
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
 
           {/* Controls */}
@@ -350,6 +428,29 @@ export function ChampionsCardGenerator({
                   </div>
                 </>
               )}
+            </div>
+
+            {/* Volleyball graphics (drag on the preview to place) */}
+            <div className="rounded-lg border border-[rgb(var(--border-soft))] p-2.5">
+              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2 flex items-center gap-1"><Shapes size={11} /> Graphics <span className="font-normal text-[10px]">— tap to add, drag on preview</span></label>
+              <div className="grid grid-cols-6 gap-1.5">
+                {GRAPHICS.map((g) => (
+                  <button key={g.key} onClick={() => addSticker(g.key)} title={g.label}
+                    className="aspect-square rounded-lg border border-[rgb(var(--border-soft))] hover:border-yellow-500 flex items-center justify-center text-[rgb(var(--fg))] p-1.5"
+                    dangerouslySetInnerHTML={{ __html: g.preview }} />
+                ))}
+              </div>
+              {selectedSticker && (() => {
+                const st = stickers.find((x) => x.id === selectedSticker)
+                if (!st) return null
+                return (
+                  <div className="mt-2 pt-2 border-t border-[rgb(var(--border-soft))]">
+                    <label className="text-[10px] font-bold text-[rgb(var(--muted-fg))] block mb-1">Rotate: {st.rot}°</label>
+                    <input type="range" min="0" max="360" step="5" value={st.rot} onChange={(e) => updateSticker(st.id, { rot: Number(e.target.value) })} className="w-full accent-yellow-500" />
+                    <button onClick={() => removeSticker(st.id)} className="mt-1 text-[11px] font-bold text-red-500">Remove selected</button>
+                  </div>
+                )
+              })()}
             </div>
 
             {/* Brand lockup: logo + org name, tied together */}
@@ -471,7 +572,7 @@ function drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: numb
 
 // ─── Canvas rendering ────────────────────────────────────────────────────────
 interface Brand { name: string; placement: 'topLeft' | 'topCenter' | 'topRight'; logo: HTMLImageElement | null }
-interface CardData { title: string; subtitle: string; placements: Placement[]; style: Style; photoImg: HTMLImageElement | null; brand: Brand; footer: string }
+interface CardData { title: string; subtitle: string; placements: Placement[]; style: Style; photoImg: HTMLImageElement | null; brand: Brand; footer: string; stickers: Sticker[] }
 interface Rect { x: number; y: number; w: number; h: number }
 
 function drawCard(canvas: HTMLCanvasElement, data: CardData, dimension: string, scale: number) {
@@ -558,12 +659,37 @@ function drawCard(canvas: HTMLCanvasElement, data: CardData, dimension: string, 
     ctx.fillText(data.footer, W / 2, H - U * 34)
   }
 
+  // ── Stickers: volleyball graphics layered on top, at their % positions ──
+  for (const st of data.stickers) {
+    const g = getGraphic(st.graphic)
+    if (!g) continue
+    const size = (st.sizePct / 100) * W
+    const cxp = (st.xPct / 100) * W
+    const cyp = (st.yPct / 100) * H
+    ctx.save()
+    ctx.translate(cxp, cyp)
+    if (st.rot) ctx.rotate((st.rot * Math.PI) / 180)
+    ctx.translate(-size / 2, -size / 2)
+    ctx.scale(size / 100, size / 100) // graphics draw in a 0..100 box
+    g.draw(ctx, s.accent, darken(s.accent))
+    ctx.restore()
+  }
+
   // Footer accent line.
   ctx.fillStyle = s.accent
   ctx.fillRect(0, H - U * 10, W, U * 10)
 }
 
-// Draws the logo + org name lockup at the chosen top placement.
+// Darken an accent hex for graphic contrast tones.
+function darken(hex: string): string {
+  const h = hex.replace('#', '')
+  const r = Math.max(0, (parseInt(h.substring(0, 2), 16) || 0) - 60)
+  const g = Math.max(0, (parseInt(h.substring(2, 4), 16) || 0) - 60)
+  const b = Math.max(0, (parseInt(h.substring(4, 6), 16) || 0) - 60)
+  return `rgb(${r},${g},${b})`
+}
+
+function clamp(v: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, v)) }
 function drawBrand(ctx: CanvasRenderingContext2D, W: number, margin: number, U: number, fam: string, brand: Brand, textCol: string, accent: string) {
   if (!brand.name && !brand.logo) return
   const pad = Math.max(margin, U * 30)
