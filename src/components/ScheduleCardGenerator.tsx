@@ -55,7 +55,38 @@ interface CardStyle {
   titleSize: TitleSize
   showQuote: boolean
   showQR: boolean
+  dateFormat: DateFormat
+  dateLocale: string
+  showYear: boolean
+  sectionOrder: SectionKey[]
+  hiddenSections: SectionKey[]
+  twoColumn: boolean
 }
+
+// Reorderable/hideable content sections (Phase 2). The renderer walks sectionOrder,
+// skipping hiddenSections — so admins arrange the card freely (flexibility, principle 2).
+type SectionKey = 'title' | 'date' | 'time' | 'venue' | 'quote'
+const SECTION_LABELS: Record<SectionKey, string> = {
+  title: 'Title', date: 'Date', time: 'Time', venue: 'Venue', quote: 'Quote',
+}
+const DEFAULT_SECTION_ORDER: SectionKey[] = ['title', 'date', 'time', 'venue', 'quote']
+
+// Date presentation styles for the schedule card. Full control (principle 2):
+// the same date data renders in whichever style fits the card.
+type DateFormat = 'bigDay' | 'longForm' | 'compact' | 'numeric'
+const DATE_FORMATS: { value: DateFormat; label: string }[] = [
+  { value: 'bigDay', label: 'Big Day' },
+  { value: 'longForm', label: 'Long Form' },
+  { value: 'compact', label: 'Compact' },
+  { value: 'numeric', label: 'Numeric' },
+]
+const DATE_LOCALES: { value: string; label: string }[] = [
+  { value: 'en-US', label: 'English (US)' },
+  { value: 'en-GB', label: 'English (UK)' },
+  { value: 'en-PH', label: 'English (PH)' },
+  { value: 'fil-PH', label: 'Filipino' },
+  { value: 'es-ES', label: 'Español' },
+]
 
 const QUOTES = [
   "Leave it all on the court.",
@@ -90,24 +121,83 @@ function hexToRGBString(hex: string): string {
   return `${r}, ${g}, ${b}`
 }
 
-function formatDateDisplay(iso: string): { day: string; month: string; weekday: string } {
-  if (!iso) return { day: '--', month: '', weekday: '' }
+// Parse an ISO date safely (supports "YYYY-MM-DD" and multi-day "start..end").
+function parseDate(iso: string): Date | null {
+  if (!iso) return null
   const d = new Date(iso + 'T00:00:00')
-  if (isNaN(d.getTime())) return { day: '--', month: '', weekday: '' }
-  return {
-    day: d.getDate().toString(),
-    month: d.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(),
-    weekday: d.toLocaleDateString('en-US', { weekday: 'long' }),
+  return isNaN(d.getTime()) ? null : d
+}
+
+// A date value may be single ("2026-03-15") or a range ("2026-03-15..2026-03-16").
+function splitDateRange(iso: string): { start: string; end: string | null } {
+  if (iso && iso.includes('..')) {
+    const [start, end] = iso.split('..')
+    return { start: start.trim(), end: end.trim() }
+  }
+  return { start: iso, end: null }
+}
+
+// Returns the pieces used by the "bigDay" layout for a single date.
+function formatDateParts(iso: string, locale: string): { day: string; month: string; weekday: string; year: string } {
+  const d = parseDate(iso)
+  if (!d) return { day: '--', month: '', weekday: '', year: '' }
+  try {
+    return {
+      day: d.getDate().toString(),
+      month: d.toLocaleDateString(locale, { month: 'short' }).toUpperCase(),
+      weekday: d.toLocaleDateString(locale, { weekday: 'long' }),
+      year: d.getFullYear().toString(),
+    }
+  } catch {
+    return { day: d.getDate().toString(), month: '', weekday: '', year: d.getFullYear().toString() }
   }
 }
 
+// Produces a single date line for longForm / compact / numeric formats,
+// handling multi-day ranges and the year toggle.
+function formatDateLine(iso: string, fmt: DateFormat, locale: string, showYear: boolean): string {
+  const { start, end } = splitDateRange(iso)
+  const ds = parseDate(start)
+  if (!ds) return ''
+  const de = end ? parseDate(end) : null
+  const opts = (): Intl.DateTimeFormatOptions => {
+    if (fmt === 'longForm') return { weekday: 'long', month: 'long', day: 'numeric', ...(showYear ? { year: 'numeric' } : {}) }
+    if (fmt === 'compact') return { month: 'short', day: 'numeric', ...(showYear ? { year: 'numeric' } : {}) }
+    return { day: '2-digit', month: '2-digit', ...(showYear ? { year: 'numeric' } : {}) } // numeric
+  }
+  const fmtOne = (d: Date) => {
+    try { return d.toLocaleDateString(locale, opts()) } catch { return d.toLocaleDateString('en-US', opts()) }
+  }
+  if (de && de.getTime() !== ds.getTime()) {
+    // Multi-day: compress same-month ranges nicely (e.g. "Mar 15–16, 2026").
+    const sameMonth = ds.getMonth() === de.getMonth() && ds.getFullYear() === de.getFullYear()
+    if (sameMonth && (fmt === 'compact' || fmt === 'longForm')) {
+      const monthName = ds.toLocaleDateString(locale, { month: fmt === 'longForm' ? 'long' : 'short' })
+      const yr = showYear ? `, ${ds.getFullYear()}` : ''
+      return `${monthName} ${ds.getDate()}–${de.getDate()}${yr}`
+    }
+    return `${fmtOne(ds)} – ${fmtOne(de)}`
+  }
+  return fmtOne(ds)
+}
+
 function formatTimeDisplay(t: string): string {
-  if (!t) return '--:--'
+  if (!t) return ''
   const [h, m] = t.split(':').map(Number)
   if (isNaN(h)) return t
   const period = h >= 12 ? 'PM' : 'AM'
   const h12 = h % 12 === 0 ? 12 : h % 12
   return `${h12}:${(m ?? 0).toString().padStart(2, '0')} ${period}`
+}
+
+// Time range that degrades gracefully when only one end is present.
+function formatTimeRange(startTime: string, endTime: string): string {
+  const s = formatTimeDisplay(startTime)
+  const e = formatTimeDisplay(endTime)
+  if (s && e) return `${s} – ${e}`
+  if (s && !e) return `${s} onwards`
+  if (!s && e) return `Until ${e}`
+  return ''
 }
 
 function loadImage(src: string): Promise<HTMLImageElement | null> {
@@ -218,7 +308,7 @@ function processImage(img: HTMLImageElement, treatment: ImageTreatment, accentRG
 
 // A stack element to be laid out vertically and centered in the content area.
 type StackItem =
-  | { kind: 'text'; text: string; font: string; color: string; gapAfter: number; lineHeight: number; maxWidth?: number }
+  | { kind: 'text'; text: string; font: string; color: string; gapAfter: number; lineHeight: number; maxWidth?: number; icon?: 'pin' }
   | { kind: 'gap'; height: number }
   | { kind: 'rule'; width: number; height: number; color: string; gapAfter: number }
 
@@ -258,9 +348,40 @@ function renderStack(
     ctx.font = it.font
     ctx.fillStyle = it.color
     const wrapped = lines[idx] as string[]
-    wrapped.forEach((ln) => { y += it.lineHeight; ctx.fillText(ln, anchorX, y) })
+    wrapped.forEach((ln, li) => {
+      y += it.lineHeight
+      // Draw a small vector location pin before the first line of a venue item.
+      if (it.icon === 'pin' && li === 0) {
+        const size = it.lineHeight * 0.5
+        const tw = ctx.measureText(ln).width
+        const pinX = canvasAlign === 'left' ? anchorX : canvasAlign === 'right' ? anchorX - tw - size * 1.3 : anchorX - tw / 2 - size * 1.3
+        drawPin(ctx, pinX + size * 0.5, y - it.lineHeight * 0.32, size, it.color)
+        // Shift text right of the pin by re-drawing with padding via a space-adjusted anchor.
+        const pad = size * 1.3
+        const ax = canvasAlign === 'left' ? anchorX + pad : anchorX + (canvasAlign === 'center' ? pad / 2 : 0)
+        ctx.fillText(ln, ax, y)
+        return
+      }
+      ctx.fillText(ln, anchorX, y)
+    })
     y += it.gapAfter
   })
+}
+
+// A clean vector location pin (replaces the inconsistent 📍 emoji glyph).
+function drawPin(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, color: string) {
+  ctx.save()
+  ctx.fillStyle = color
+  ctx.beginPath()
+  // Teardrop body.
+  ctx.arc(cx, cy, s * 0.5, Math.PI, 0, false)
+  ctx.lineTo(cx, cy + s * 0.9)
+  ctx.closePath()
+  ctx.fill()
+  // Inner hole.
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.beginPath(); ctx.arc(cx, cy, s * 0.18, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
 }
 
 function alignAnchor(align: Alignment, left: number, width: number): { x: number; canvasAlign: CanvasTextAlign } {
@@ -335,8 +456,9 @@ async function drawCard(
 
   const accent = `rgb(${style.accentRGB})`
   const fam = fontFamily(style.font)
-  const { day, month, weekday } = formatDateDisplay(data.date)
-  const timeRange = `${formatTimeDisplay(data.startTime)} – ${formatTimeDisplay(data.endTime)}`
+  const { day, month, weekday, year } = formatDateParts(splitDateRange(data.date).start, style.dateLocale)
+  const dateLine = formatDateLine(data.date, style.dateFormat, style.dateLocale, style.showYear)
+  const timeRange = formatTimeRange(data.startTime, data.endTime)
 
   const isSilhouette = treatment === 'silhouette'
   const photoSource: HTMLImageElement | HTMLCanvasElement | null =
@@ -544,23 +666,63 @@ async function drawCard(
   const quotePx = 27 * U
   const footerPx = 26 * U
 
-  const stack: StackItem[] = []
-  stack.push({ kind: 'text', text: useUpperTitle ? upper(data.scheduleName) : data.scheduleName,
-    font: `700 ${titlePx}px ${fam}`, color: primaryText, gapAfter: 18 * U, lineHeight: titlePx * 1.05, maxWidth: wrapW })
-  if (template === 'minimal') {
-    stack.push({ kind: 'rule', width: 110 * U, height: 4 * U, color: accent, gapAfter: 24 * U })
-  }
-  stack.push({ kind: 'text', text: day, font: `900 ${dayPx}px ${fam}`, color: dayColor, gapAfter: 4 * U, lineHeight: dayPx * 0.95 })
-  stack.push({ kind: 'text', text: `${month} • ${weekday.toUpperCase()}`, font: `700 ${monthPx}px ${fam}`, color: monthColor, gapAfter: 20 * U, lineHeight: monthPx * 1.1 })
-  stack.push({ kind: 'text', text: timeRange, font: `700 ${metaPx}px ${fam}`, color: primaryText, gapAfter: 14 * U, lineHeight: metaPx * 1.1 })
-  stack.push({ kind: 'text', text: '📍 ' + data.venue, font: `600 ${venuePx}px ${fam}`, color: (template === 'energetic' ? accent : primaryText), gapAfter: 24 * U, lineHeight: venuePx * 1.2, maxWidth: wrapW })
-  if (style.showQuote && data.quote) {
-    stack.push({ kind: 'text', text: `"${data.quote}"`, font: `italic 400 ${quotePx}px Georgia`, color: mutedText, gapAfter: 0, lineHeight: quotePx * 1.3, maxWidth: wrapW })
+  // Build each section's stack items on demand, then assemble by the chosen order,
+  // skipping hidden sections. This makes the card fully reorderable/hideable.
+  const buildSection = (key: SectionKey): StackItem[] => {
+    switch (key) {
+      case 'title': {
+        const items: StackItem[] = [{ kind: 'text', text: useUpperTitle ? upper(data.scheduleName) : data.scheduleName,
+          font: `700 ${titlePx}px ${fam}`, color: primaryText, gapAfter: 18 * U, lineHeight: titlePx * 1.05, maxWidth: wrapW }]
+        if (template === 'minimal') items.push({ kind: 'rule', width: 110 * U, height: 4 * U, color: accent, gapAfter: 24 * U })
+        return items
+      }
+      case 'date':
+        if (style.dateFormat === 'bigDay') {
+          const monthLine = `${month} • ${weekday.toUpperCase()}${style.showYear && year ? ' • ' + year : ''}`
+          return [
+            { kind: 'text', text: day, font: `900 ${dayPx}px ${fam}`, color: dayColor, gapAfter: 4 * U, lineHeight: dayPx * 0.95 },
+            { kind: 'text', text: monthLine, font: `700 ${monthPx}px ${fam}`, color: monthColor, gapAfter: 20 * U, lineHeight: monthPx * 1.1 },
+          ]
+        }
+        return [{ kind: 'text', text: dateLine, font: `800 ${monthPx * 1.15}px ${fam}`, color: monthColor, gapAfter: 18 * U, lineHeight: monthPx * 1.25, maxWidth: wrapW }]
+      case 'time':
+        return timeRange ? [{ kind: 'text', text: timeRange, font: `700 ${metaPx}px ${fam}`, color: primaryText, gapAfter: 14 * U, lineHeight: metaPx * 1.1 }] : []
+      case 'venue':
+        return data.venue ? [{ kind: 'text', text: data.venue, font: `600 ${venuePx}px ${fam}`, color: (template === 'energetic' ? accent : primaryText), gapAfter: 24 * U, lineHeight: venuePx * 1.2, maxWidth: wrapW, icon: 'pin' }] : []
+      case 'quote':
+        return (style.showQuote && data.quote) ? [{ kind: 'text', text: `"${data.quote}"`, font: `italic 400 ${quotePx}px ${fam}`, color: mutedText, gapAfter: 0, lineHeight: quotePx * 1.3, maxWidth: wrapW }] : []
+      default:
+        return []
+    }
   }
 
-  // Reserve a footer strip at the very bottom; center the stack in the rest.
+  const order = (style.sectionOrder && style.sectionOrder.length ? style.sectionOrder : DEFAULT_SECTION_ORDER)
+  const hidden = new Set(style.hiddenSections || [])
+  const visible = order.filter((k) => !hidden.has(k))
+
   const footerBand = 90 * U
-  renderStack(ctx, stack, anchorX, canvasAlign, contentTop + 30 * U, contentHeight - footerBand - 30 * U)
+  const stackTop = contentTop + 30 * U
+  const stackAreaH = contentHeight - footerBand - 30 * U
+
+  // Two-column arrangement (Phase 3): date block in the left column, the rest on
+  // the right. Falls back to a single centered stack when off or too narrow.
+  if (style.twoColumn && contentWidth > 700 * U && visible.includes('date')) {
+    const colGap = 40 * U
+    const leftW = contentWidth * 0.42
+    const rightW = contentWidth - leftW - colGap
+    const leftX = contentLeft + leftW / 2
+    const rightX = contentLeft + leftW + colGap + rightW / 2
+    const leftStack = buildSection('date')
+    const rightStack: StackItem[] = []
+    for (const k of visible) { if (k !== 'date') rightStack.push(...buildSection(k)) }
+    renderStack(ctx, leftStack, leftX, 'center', stackTop, stackAreaH)
+    renderStack(ctx, rightStack, rightX, 'center', stackTop, stackAreaH)
+  } else {
+    const stack: StackItem[] = []
+    for (const k of visible) stack.push(...buildSection(k))
+    renderStack(ctx, stack, anchorX, canvasAlign, stackTop, stackAreaH)
+  }
+
 
   // Footer (always centered horizontally in content area, pinned near bottom)
   ctx.textAlign = 'center'
@@ -654,6 +816,16 @@ export function ScheduleCardGenerator({
     else setTextColorMode('auto')
     if (t.template) setTemplate(t.template as Template)
     if (t.background) setBackground(t.background as BackgroundStyle)
+    // Layout arrangement (Phase 3): restore date settings + section order/columns.
+    const L = t.layout
+    if (L) {
+      if (typeof L.dateFormat === 'string') setDateFormat(L.dateFormat as DateFormat)
+      if (typeof L.dateLocale === 'string') setDateLocale(L.dateLocale)
+      if (typeof L.showYear === 'boolean') setShowYear(L.showYear)
+      if (Array.isArray(L.sectionOrder) && L.sectionOrder.length) setSectionOrder(L.sectionOrder as SectionKey[])
+      if (Array.isArray(L.hiddenSections)) setHiddenSections(L.hiddenSections as SectionKey[])
+      if (typeof L.twoColumn === 'boolean') setTwoColumn(L.twoColumn)
+    }
   }
 
   const handleSaveTheme = async () => {
@@ -666,6 +838,7 @@ export function ScheduleCardGenerator({
         textMode: textColorMode,
         textHex: textColorMode === 'custom' ? customTextHex : null,
         template, background,
+        layout: { dateFormat, dateLocale, showYear, sectionOrder, hiddenSections, twoColumn },
       } })
       setThemeMsg(`Saved "${name}"`)
       setThemeName('')
@@ -685,6 +858,26 @@ export function ScheduleCardGenerator({
   const [titleSize, setTitleSize] = useState<TitleSize>('normal')
   const [showQuote, setShowQuote] = useState(true)
   const [showQR, setShowQR] = useState(false)
+  const [dateFormat, setDateFormat] = useState<DateFormat>('bigDay')
+  const [dateLocale, setDateLocale] = useState('en-US')
+  const [showYear, setShowYear] = useState(false)
+  const [sectionOrder, setSectionOrder] = useState<SectionKey[]>(DEFAULT_SECTION_ORDER)
+  const [hiddenSections, setHiddenSections] = useState<SectionKey[]>([])
+  const [twoColumn, setTwoColumn] = useState(false)
+
+  const moveSection = (key: SectionKey, dir: -1 | 1) => {
+    setSectionOrder((prev) => {
+      const i = prev.indexOf(key)
+      const j = i + dir
+      if (i < 0 || j < 0 || j >= prev.length) return prev
+      const next = [...prev]
+      ;[next[i], next[j]] = [next[j], next[i]]
+      return next
+    })
+  }
+  const toggleSection = (key: SectionKey) => {
+    setHiddenSections((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
+  }
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const logoRef = useRef<HTMLImageElement | null>(null)
@@ -717,6 +910,8 @@ export function ScheduleCardGenerator({
     showLogo, logoH, logoV,
     footerText: footerText || 'The Rebels Volleyball',
     background, titleSize, showQuote, showQR,
+    dateFormat, dateLocale, showYear,
+    sectionOrder, hiddenSections, twoColumn,
   })
 
   const render = useCallback(() => {
@@ -728,7 +923,7 @@ export function ScheduleCardGenerator({
     )
   }, [template, dimension, venue, date, startTime, endTime, quote, scheduleName, treatment, placement, sidePos,
       useCustomAccent, customAccentHex, font, align, textColorMode, customTextHex, showLogo, logoH, logoV,
-      footerText, background, titleSize, showQuote, showQR])
+      footerText, background, titleSize, showQuote, showQR, dateFormat, dateLocale, showYear, sectionOrder, hiddenSections, twoColumn])
 
   useEffect(() => { render() }, [render])
 
@@ -896,6 +1091,50 @@ export function ScheduleCardGenerator({
                     <SegBtn key={t} active={titleSize === t} onClick={() => setTitleSize(t)}>{t}</SegBtn>
                   ))}
                 </div>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Date Format</label>
+                <div className="grid grid-cols-4 gap-2 mb-2">
+                  {DATE_FORMATS.map((f) => (
+                    <SegBtn key={f.value} active={dateFormat === f.value} onClick={() => setDateFormat(f.value)}>{f.label}</SegBtn>
+                  ))}
+                </div>
+                <div className="flex gap-2 items-center">
+                  <select value={dateLocale} onChange={(e) => setDateLocale(e.target.value)}
+                    className="flex-1 text-xs rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-2 py-2 focus:outline-none focus:border-[rgb(var(--accent-500))]">
+                    {DATE_LOCALES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+                  </select>
+                  <SegBtn active={showYear} onClick={() => setShowYear(!showYear)}>Year</SegBtn>
+                </div>
+                <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1">Multi-day: enter date as <span className="font-mono">2026-03-15..2026-03-16</span></p>
+              </div>
+
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Sections (reorder / hide)</label>
+                  <SegBtn active={twoColumn} onClick={() => setTwoColumn(!twoColumn)}>2-Column</SegBtn>
+                </div>
+                <div className="space-y-1.5">
+                  {sectionOrder.map((key, i) => {
+                    const isHidden = hiddenSections.includes(key)
+                    return (
+                      <div key={key} className={`flex items-center gap-2 rounded-lg border border-[rgb(var(--border-soft))] px-2 py-1.5 ${isHidden ? 'opacity-50' : ''}`}>
+                        <span className="text-xs font-bold flex-1">{SECTION_LABELS[key]}</span>
+                        <button onClick={() => moveSection(key, -1)} disabled={i === 0}
+                          className="text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] disabled:opacity-30 px-1" title="Move up">↑</button>
+                        <button onClick={() => moveSection(key, 1)} disabled={i === sectionOrder.length - 1}
+                          className="text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] disabled:opacity-30 px-1" title="Move down">↓</button>
+                        <button onClick={() => toggleSection(key)}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded ${isHidden ? 'text-[rgb(var(--muted-fg))]' : 'text-[rgb(var(--accent-600))]'}`}
+                          title={isHidden ? 'Hidden — tap to show' : 'Visible — tap to hide'}>
+                          {isHidden ? 'Hidden' : 'Shown'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1">2-Column places the date beside the details (wide formats).</p>
               </div>
 
               <div className="mb-4">
