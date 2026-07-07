@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { getExecutiveDashboard } from '@/server/dashboard.functions'
-import { Users, CalendarDays, UserCheck, TrendingUp, Wallet, AlertCircle } from 'lucide-react'
+import { Users, CalendarDays, UserCheck, TrendingUp, Wallet, AlertCircle, TrendingDown, Percent, Coins, Target } from 'lucide-react'
 import { motion } from 'motion/react'
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -53,6 +53,16 @@ function DashboardPage() {
   ].filter((d) => d.value > 0)
 
   const typeData = (data.byType ?? []).map((t: any, i: number) => ({ name: t.type, value: t.count, color: [INDIGO, VIOLET, AMBER, EMERALD][i % 4] }))
+  const agingData = [
+    { name: '0–30d', value: data.aging?.d0_30 ?? 0, color: EMERALD },
+    { name: '31–60d', value: data.aging?.d31_60 ?? 0, color: AMBER },
+    { name: '61–90d', value: data.aging?.d61_90 ?? 0, color: '#f97316' },
+    { name: '90d+', value: data.aging?.d90_plus ?? 0, color: RED },
+  ]
+  const agingTotal = agingData.reduce((s, a) => s + a.value, 0)
+  const expenseCatData = (data.expenseByCategory ?? []).map((e: any, i: number) => ({
+    name: e.category, value: e.total, color: [RED, AMBER, INDIGO, VIOLET, EMERALD, '#06b6d4', '#ec4899', '#64748b'][i % 8],
+  }))
 
 
   return (
@@ -73,11 +83,21 @@ function DashboardPage() {
       </div>
 
       {/* Finance headline */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <KpiCard icon={Wallet} label="Expected" value={money(data.finance.expected)} accent={INDIGO} i={0} small />
         <KpiCard icon={Wallet} label="Collected" value={money(data.finance.collected)} accent={EMERALD} i={1} small />
         <KpiCard icon={AlertCircle} label="Outstanding" value={money(data.finance.outstanding)} accent={RED} i={2} small />
         <KpiCard icon={TrendingUp} label="Collection Rate" value={`${data.finance.collectionRate}%`} accent={INDIGO} i={3} small />
+      </div>
+
+      {/* Financial depth */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+        <KpiCard icon={data.finance.net >= 0 ? TrendingUp : TrendingDown} label="Net (cash)" value={money(data.finance.net)} accent={data.finance.net >= 0 ? EMERALD : RED} i={0} small />
+        <KpiCard icon={TrendingDown} label="Expenses" value={money(data.finance.expenses)} accent={AMBER} i={1} small />
+        <KpiCard icon={Percent} label="Net Margin" value={`${data.finance.netMargin}%`} accent={data.finance.netMargin >= 0 ? EMERALD : RED} i={2} small />
+        <KpiCard icon={Coins} label="Revenue / Player" value={money(data.finance.revenuePerParticipant)} accent={INDIGO} i={3} small />
+        <KpiCard icon={Coins} label="Cost / Player" value={money(data.finance.costPerParticipant)} accent={AMBER} i={4} small />
+        <KpiCard icon={Target} label="Break-even" value={`${data.finance.breakEvenPct}%`} accent={data.finance.breakEvenPct >= 100 ? EMERALD : RED} i={5} small />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
@@ -156,6 +176,38 @@ function DashboardPage() {
             </ResponsiveContainer>
           )}
         </Panel>
+
+        {/* Outstanding aging */}
+        <Panel title="Outstanding Aging" subtitle="How old is the unpaid balance?" i={9}>
+          {agingTotal === 0 ? <Empty note="Nothing outstanding — all collected." /> : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={agingData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.2)" />
+                <XAxis dataKey="name" stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} />
+                <RTooltip contentStyle={tooltipStyle} formatter={(v: any) => money(Number(v))} />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                  {agingData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Panel>
+
+        {/* Expenses by category */}
+        {expenseCatData.length > 0 && (
+          <Panel title="Expenses by Category" subtitle="Where does the money go?" i={10}>
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={expenseCatData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={80} paddingAngle={2}>
+                  {expenseCatData.map((d: any, i: number) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+                <RTooltip contentStyle={tooltipStyle} formatter={(v: any) => money(Number(v))} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </Panel>
+        )}
 
         {/* Registration types */}
         <Panel title="Registration Types" subtitle="How do people sign up?" i={6}>
