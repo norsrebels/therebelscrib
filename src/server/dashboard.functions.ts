@@ -125,39 +125,81 @@ export const getExecutiveDashboard = createServerFn({ method: 'GET' }).handler(a
       return r.rows as any[]
     }, [])
 
-    // ─── Expenses: total + by category + by month (for Net = Revenue − Expenses) ─
+    // ─── Expenses: total + by category + by month (ACTIVE only, from the ledger) ─
+    // Reads the new `expenses` table; archived_at IS NULL = active. Falls back to
+    // the older schedule_expenses table if the ledger isn't deployed yet.
     const expenseTotal = await safe(async () => {
-      const r = await db.execute(sql`SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM schedule_expenses`)
-      return Number((r.rows[0] as any)?.total ?? 0)
+      try {
+        const r = await db.execute(sql`SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM expenses WHERE archived_at IS NULL`)
+        return Number((r.rows[0] as any)?.total ?? 0)
+      } catch {
+        const r = await db.execute(sql`SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM schedule_expenses`)
+        return Number((r.rows[0] as any)?.total ?? 0)
+      }
     }, 0)
 
     const expenseByCategory = await safe(async () => {
-      const r = await db.execute(sql`
-        SELECT category, COALESCE(SUM(amount), 0)::numeric AS total
-        FROM schedule_expenses GROUP BY category ORDER BY total DESC
-      `)
-      return r.rows as any[]
+      try {
+        const r = await db.execute(sql`
+          SELECT category, COALESCE(SUM(amount), 0)::numeric AS total
+          FROM expenses WHERE archived_at IS NULL GROUP BY category ORDER BY total DESC
+        `)
+        return r.rows as any[]
+      } catch {
+        const r = await db.execute(sql`
+          SELECT category, COALESCE(SUM(amount), 0)::numeric AS total
+          FROM schedule_expenses GROUP BY category ORDER BY total DESC
+        `)
+        return r.rows as any[]
+      }
     }, [])
 
     const expenseByMonth = await safe(async () => {
-      const r = await db.execute(sql`
-        SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
-               COALESCE(SUM(amount), 0)::numeric AS total
-        FROM schedule_expenses
-        WHERE created_at >= now() - interval '12 months'
-        GROUP BY 1 ORDER BY 1
-      `)
-      return r.rows as any[]
+      try {
+        const r = await db.execute(sql`
+          SELECT to_char(date_trunc('month', COALESCE(expense_date, created_at::date)), 'YYYY-MM') AS month,
+                 COALESCE(SUM(amount), 0)::numeric AS total
+          FROM expenses
+          WHERE archived_at IS NULL AND COALESCE(expense_date, created_at::date) >= (now() - interval '12 months')::date
+          GROUP BY 1 ORDER BY 1
+        `)
+        return r.rows as any[]
+      } catch {
+        const r = await db.execute(sql`
+          SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
+                 COALESCE(SUM(amount), 0)::numeric AS total
+          FROM schedule_expenses
+          WHERE created_at >= now() - interval '12 months'
+          GROUP BY 1 ORDER BY 1
+        `)
+        return r.rows as any[]
+      }
     }, [])
+
+    // ─── Outstanding aging: unpaid balance bucketed by how old the registration is ─
+    const aging = await safe(async () => {
+      const r = await db.execute(sql`
+        SELECT
+          COALESCE(SUM(CASE WHEN created_at >= now() - interval '30 days'  THEN amount_due - amount_paid ELSE 0 END), 0)::numeric AS d0_30,
+          COALESCE(SUM(CASE WHEN created_at <  now() - interval '30 days'  AND created_at >= now() - interval '60 days' THEN amount_due - amount_paid ELSE 0 END), 0)::numeric AS d31_60,
+          COALESCE(SUM(CASE WHEN created_at <  now() - interval '60 days'  AND created_at >= now() - interval '90 days' THEN amount_due - amount_paid ELSE 0 END), 0)::numeric AS d61_90,
+          COALESCE(SUM(CASE WHEN created_at <  now() - interval '90 days'  THEN amount_due - amount_paid ELSE 0 END), 0)::numeric AS d90_plus
+        FROM registrations
+        WHERE status != 'cancelled' AND amount_due > amount_paid
+      `)
+      return r.rows[0] as any
+    }, { d0_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 })
 
     const expected = Number(finance.expected ?? 0)
     const collected = Number(finance.collected ?? 0)
+    const uniqueParticipants = Number(counts.unique_participants ?? 0)
+    const netCollected = Number((collected - expenseTotal).toFixed(2))
 
     return {
       counts: {
         totalRegistrations: Number(counts.total_registrations ?? 0),
         activeSchedules: Number(counts.active_schedules ?? 0),
-        uniqueParticipants: Number(counts.unique_participants ?? 0),
+        uniqueParticipants,
       },
       byMonth: byMonth.map((m) => ({ month: m.month, count: Number(m.count) })),
       bySchedule: bySchedule.map((s) => ({
@@ -178,9 +220,23 @@ export const getExecutiveDashboard = createServerFn({ method: 'GET' }).handler(a
         unpaidCount: Number(finance.unpaid_count ?? 0),
         expenses: expenseTotal,
         // Net uses COLLECTED (actual cash in) minus expenses — true profit on hand.
-        // netExpected uses expected revenue, for a forward-looking view.
-        net: Number((collected - expenseTotal).toFixed(2)),
+        net: netCollected,
         netExpected: Number((expected - expenseTotal).toFixed(2)),
+        // ── Financial-depth metrics ──
+        // Net margin = profit as a % of collected revenue (profitability, not raw net).
+        netMargin: collected > 0 ? Math.round((netCollected / collected) * 100) : 0,
+        // Unit economics per unique participant.
+        revenuePerParticipant: uniqueParticipants > 0 ? Number((collected / uniqueParticipants).toFixed(2)) : 0,
+        costPerParticipant: uniqueParticipants > 0 ? Number((expenseTotal / uniqueParticipants).toFixed(2)) : 0,
+        netPerParticipant: uniqueParticipants > 0 ? Number((netCollected / uniqueParticipants).toFixed(2)) : 0,
+        // Break-even: expenses recovered as a % of collected (100%+ = profitable).
+        breakEvenPct: expenseTotal > 0 ? Math.round((collected / expenseTotal) * 100) : (collected > 0 ? 100 : 0),
+      },
+      aging: {
+        d0_30: Number(aging.d0_30 ?? 0),
+        d31_60: Number(aging.d31_60 ?? 0),
+        d61_90: Number(aging.d61_90 ?? 0),
+        d90_plus: Number(aging.d90_plus ?? 0),
       },
       expenseByCategory: expenseByCategory.map((e) => ({ category: e.category, total: Number(e.total) })),
       expenseByMonth: expenseByMonth.map((e) => ({ month: e.month, total: Number(e.total) })),
