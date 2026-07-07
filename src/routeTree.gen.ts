@@ -30,6 +30,7 @@ import { Route as AssessmentRouteImport } from './routes/assessment'
 import { Route as AdminRegistrationsRouteImport } from './routes/admin-registrations'
 import { Route as AdminDbConsoleRouteImport } from './routes/admin-db-console'
 import { Route as AdminDbCheckRouteImport } from './routes/admin-db-check'
+import { Route as AdminDashboardRouteImport } from './routes/admin-dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LiveTournamentIdRouteImport } from './routes/live.$tournamentId'
 import { Route as ApiPlayersRouteImport } from './routes/api.players'
@@ -144,6 +145,11 @@ const AdminDbCheckRoute = AdminDbCheckRouteImport.update({
   path: '/admin-db-check',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminDashboardRoute = AdminDashboardRouteImport.update({
+  id: '/admin-dashboard',
+  path: '/admin-dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -187,6 +193,7 @@ const ApiImageIdRoute = ApiImageIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin-dashboard': typeof AdminDashboardRoute
   '/admin-db-check': typeof AdminDbCheckRoute
   '/admin-db-console': typeof AdminDbConsoleRoute
   '/admin-registrations': typeof AdminRegistrationsRoute
@@ -218,6 +225,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin-dashboard': typeof AdminDashboardRoute
   '/admin-db-check': typeof AdminDbCheckRoute
   '/admin-db-console': typeof AdminDbConsoleRoute
   '/admin-registrations': typeof AdminRegistrationsRoute
@@ -250,6 +258,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin-dashboard': typeof AdminDashboardRoute
   '/admin-db-check': typeof AdminDbCheckRoute
   '/admin-db-console': typeof AdminDbConsoleRoute
   '/admin-registrations': typeof AdminRegistrationsRoute
@@ -283,6 +292,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin-dashboard'
     | '/admin-db-check'
     | '/admin-db-console'
     | '/admin-registrations'
@@ -314,6 +324,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin-dashboard'
     | '/admin-db-check'
     | '/admin-db-console'
     | '/admin-registrations'
@@ -345,6 +356,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin-dashboard'
     | '/admin-db-check'
     | '/admin-db-console'
     | '/admin-registrations'
@@ -377,6 +389,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminDashboardRoute: typeof AdminDashboardRoute
   AdminDbCheckRoute: typeof AdminDbCheckRoute
   AdminDbConsoleRoute: typeof AdminDbConsoleRoute
   AdminRegistrationsRoute: typeof AdminRegistrationsRoute
@@ -556,6 +569,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminDbCheckRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin-dashboard': {
+      id: '/admin-dashboard'
+      path: '/admin-dashboard'
+      fullPath: '/admin-dashboard'
+      preLoaderRoute: typeof AdminDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -617,6 +637,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminDashboardRoute: AdminDashboardRoute,
   AdminDbCheckRoute: AdminDbCheckRoute,
   AdminDbConsoleRoute: AdminDbConsoleRoute,
   AdminRegistrationsRoute: AdminRegistrationsRoute,

@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp, jsonb, boolean, uuid, varchar } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, jsonb, boolean, uuid, varchar, numeric, date } from "drizzle-orm/pg-core";
 
 export const players = pgTable("players", {
   id: serial().primaryKey(),
@@ -245,4 +245,19 @@ export const auditLog = pgTable('audit_log', {
   netlifyUserId: text('netlify_user_id'),
   netlifyEmail: text('netlify_email'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+
+// Expenses: soft-archive via archivedAt (null = active). schedule_id references
+// registration_schedules(id) with ON DELETE SET NULL at the DB level (see migration).
+export const expenses = pgTable("expenses", {
+  id: serial().primaryKey(),
+  scheduleId: integer("schedule_id"),
+  category: text().notNull().default("Other"),
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull().default("0"),
+  expenseDate: date("expense_date"),
+  note: text(),
+  isRecurring: boolean("is_recurring").notNull().default(false),
+  archivedAt: timestamp("archived_at"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 })
