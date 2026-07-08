@@ -20,6 +20,7 @@ import {
 } from '@/server/registration.functions'
 import { getCommunities, getScheduleCommunities, setScheduleCommunities } from '@/server/community.functions'
 import { ScheduleCardGenerator } from '@/components/ScheduleCardGenerator'
+import { VenueCombobox } from '@/components/VenueCombobox'
 import {
   Calendar, Plus, Trash2, X, Check, Clock, AlertTriangle, Ban,
   Download, Search, ChevronDown, RefreshCw, Wifi, Image as ImageIcon,
@@ -716,8 +717,7 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
           </div>
           <div>
             <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Venue</label>
-            <input value={venue} onChange={(e) => setVenue(e.target.value)}
-              className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+            <VenueCombobox value={venue} onChange={setVenue} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
