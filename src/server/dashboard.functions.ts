@@ -14,6 +14,13 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try { return await fn() } catch { return fallback }
 }
 
+// Percent change of current vs previous. Returns null when there's no prior base
+// (so the UI can show "—" rather than a misleading +100%).
+function pctDelta(cur: number, prev: number): number | null {
+  if (!prev) return cur > 0 ? null : 0
+  return Math.round(((cur - prev) / prev) * 100)
+}
+
 export const getExecutiveDashboard = createServerFn({ method: 'GET' }).handler(async () => {
   const admin = await getAdminUser()
   if (!admin) throw new Error('Admin access required')
@@ -56,6 +63,94 @@ export const getExecutiveDashboard = createServerFn({ method: 'GET' }).handler(a
       `)
       return r.rows as any[]
     }, [])
+
+    // ─── Per-venue analytics: events, registrations, and collected revenue ───
+    // Groups on the schedule's venue name (now consistent via the managed list),
+    // so per-venue numbers are reliable. Blank venues are excluded.
+    const byVenue = await safe(async () => {
+      const r = await db.execute(sql`
+        SELECT trim(s.venue) AS venue,
+               COUNT(DISTINCT s.id)::int AS events,
+               COUNT(r.id) FILTER (WHERE r.status != 'cancelled')::int AS registrations,
+               COALESCE(SUM(r.amount_paid) FILTER (WHERE r.status != 'cancelled'), 0)::numeric AS collected
+        FROM registration_schedules s
+        LEFT JOIN registrations r ON r.schedule_id = s.id
+        WHERE s.venue IS NOT NULL AND trim(s.venue) <> ''
+        GROUP BY trim(s.venue)
+        ORDER BY registrations DESC
+        LIMIT 15
+      `)
+      return r.rows as any[]
+    }, [])
+
+    // ─── Per-schedule profitability: collected revenue − its OWN linked expenses ─
+    // Subqueries keep revenue and expenses independent (a LEFT JOIN across both
+    // would multiply rows). Active expenses only. This is the payoff of linking
+    // expenses to schedules — profit per event, not just whole-club net.
+    const perSchedule = await safe(async () => {
+      const r = await db.execute(sql`
+        SELECT s.id, s.name,
+          COALESCE((SELECT SUM(amount_paid) FROM registrations WHERE schedule_id = s.id AND status != 'cancelled'), 0)::numeric AS collected,
+          COALESCE((SELECT SUM(amount) FROM expenses WHERE schedule_id = s.id AND archived_at IS NULL), 0)::numeric AS expenses
+        FROM registration_schedules s
+        ORDER BY collected DESC
+        LIMIT 15
+      `)
+      return r.rows as any[]
+    }, [])
+
+    // ─── New vs returning participants by month (PROVISIONAL) ─────────────────
+    // Uses the same identity key as unique_participants: COALESCE(email, phone, name).
+    // "First seen" = the participant's earliest registration month. This is an
+    // ESTIMATE until player identity is unified (a real players table).
+    const newVsReturning = await safe(async () => {
+      const r = await db.execute(sql`
+        WITH keyed AS (
+          SELECT COALESCE(email, contact_number, name) AS pkey,
+                 date_trunc('month', created_at) AS m
+          FROM registrations
+          WHERE status != 'cancelled' AND COALESCE(email, contact_number, name) IS NOT NULL
+        ),
+        firsts AS (SELECT pkey, MIN(m) AS first_m FROM keyed GROUP BY pkey)
+        SELECT to_char(k.m, 'YYYY-MM') AS month,
+               COUNT(DISTINCT k.pkey) FILTER (WHERE k.m = f.first_m)::int AS new_players,
+               COUNT(DISTINCT k.pkey) FILTER (WHERE k.m > f.first_m)::int AS returning_players
+        FROM keyed k JOIN firsts f ON f.pkey = k.pkey
+        WHERE k.m >= date_trunc('month', now() - interval '12 months')
+        GROUP BY k.m ORDER BY k.m
+      `)
+      return r.rows as any[]
+    }, [])
+
+    // Retention: of participants active in the previous 90 days before the last 90,
+    // what % returned in the last 90 days. Provisional (same identity key).
+    const retention = await safe(async () => {
+      const r = await db.execute(sql`
+        WITH keyed AS (
+          SELECT COALESCE(email, contact_number, name) AS pkey, created_at
+          FROM registrations
+          WHERE status != 'cancelled' AND COALESCE(email, contact_number, name) IS NOT NULL
+        ),
+        prior AS (SELECT DISTINCT pkey FROM keyed WHERE created_at >= now() - interval '180 days' AND created_at < now() - interval '90 days'),
+        recent AS (SELECT DISTINCT pkey FROM keyed WHERE created_at >= now() - interval '90 days')
+        SELECT (SELECT COUNT(*) FROM prior)::int AS prior_count,
+               (SELECT COUNT(*) FROM prior p WHERE EXISTS (SELECT 1 FROM recent rc WHERE rc.pkey = p.pkey))::int AS returned_count
+      `)
+      return r.rows[0] as any
+    }, { prior_count: 0, returned_count: 0 })
+
+    // Trend deltas: last 30 days vs the 30 days before, for registrations + collected.
+    const trend = await safe(async () => {
+      const r = await db.execute(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE created_at >= now() - interval '30 days')::int AS reg_cur,
+          COUNT(*) FILTER (WHERE created_at < now() - interval '30 days' AND created_at >= now() - interval '60 days')::int AS reg_prev,
+          COALESCE(SUM(amount_paid) FILTER (WHERE created_at >= now() - interval '30 days'), 0)::numeric AS cash_cur,
+          COALESCE(SUM(amount_paid) FILTER (WHERE created_at < now() - interval '30 days' AND created_at >= now() - interval '60 days'), 0)::numeric AS cash_prev
+        FROM registrations WHERE status != 'cancelled'
+      `)
+      return r.rows[0] as any
+    }, { reg_cur: 0, reg_prev: 0, cash_cur: 0, cash_prev: 0 })
 
     // ─── Registration type mix ───────────────────────────────────────────────
     const byType = await safe(async () => {
@@ -209,6 +304,37 @@ export const getExecutiveDashboard = createServerFn({ method: 'GET' }).handler(a
         fillRate: s.capacity ? Math.round((Number(s.registrations) / Number(s.capacity)) * 100) : null,
       })),
       byType: byType.map((t) => ({ type: t.reg_type, count: Number(t.count) })),
+      byVenue: byVenue.map((v) => ({
+        venue: v.venue,
+        events: Number(v.events),
+        registrations: Number(v.registrations),
+        collected: Number(v.collected),
+      })),
+      perSchedule: perSchedule.map((s) => {
+        const collected = Number(s.collected)
+        const expenses = Number(s.expenses)
+        return { name: s.name, collected, expenses, net: Number((collected - expenses).toFixed(2)) }
+      }),
+      newVsReturning: newVsReturning.map((m) => ({
+        month: m.month,
+        newPlayers: Number(m.new_players),
+        returningPlayers: Number(m.returning_players),
+      })),
+      retention: {
+        priorCount: Number(retention.prior_count ?? 0),
+        returnedCount: Number(retention.returned_count ?? 0),
+        rate: Number(retention.prior_count) > 0
+          ? Math.round((Number(retention.returned_count) / Number(retention.prior_count)) * 100)
+          : 0,
+      },
+      trend: {
+        regCur: Number(trend.reg_cur ?? 0),
+        regPrev: Number(trend.reg_prev ?? 0),
+        regDelta: pctDelta(Number(trend.reg_cur), Number(trend.reg_prev)),
+        cashCur: Number(trend.cash_cur ?? 0),
+        cashPrev: Number(trend.cash_prev ?? 0),
+        cashDelta: pctDelta(Number(trend.cash_cur), Number(trend.cash_prev)),
+      },
       byPosition: byPosition.map((p) => ({ position: p.position, count: Number(p.count) })),
       finance: {
         expected,
