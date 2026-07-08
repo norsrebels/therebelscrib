@@ -1,11 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { getExecutiveDashboard } from '@/server/dashboard.functions'
-import { Users, CalendarDays, UserCheck, TrendingUp, Wallet, AlertCircle, TrendingDown, Percent, Coins, Target } from 'lucide-react'
+import { Users, CalendarDays, UserCheck, TrendingUp, Wallet, AlertCircle, TrendingDown, Percent, Coins, Target, Repeat } from 'lucide-react'
 import { motion } from 'motion/react'
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, ComposedChart, Line,
 } from 'recharts'
 
 export const Route = createFileRoute('/admin-dashboard')({
@@ -63,6 +63,12 @@ function DashboardPage() {
   const expenseCatData = (data.expenseByCategory ?? []).map((e: any, i: number) => ({
     name: e.category, value: e.total, color: [RED, AMBER, INDIGO, VIOLET, EMERALD, '#06b6d4', '#ec4899', '#64748b'][i % 8],
   }))
+  // Merge monthly expenses into the revenue series for the break-even line.
+  const expenseMonthMap: Record<string, number> = {}
+  ;(data.expenseByMonth ?? []).forEach((e: any) => { expenseMonthMap[e.month] = e.total })
+  const revenueWithExpenses = (data.revenueByMonth ?? []).map((m: any) => ({
+    ...m, expenses: expenseMonthMap[m.month] ?? 0,
+  }))
 
 
   return (
@@ -76,16 +82,17 @@ function DashboardPage() {
       </motion.div>
 
       {/* Headline counts */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-        <KpiCard icon={Users} label="Total Registrations" value={num(data.counts.totalRegistrations)} accent={INDIGO} i={0} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <KpiCard icon={Users} label="Total Registrations" value={num(data.counts.totalRegistrations)} accent={INDIGO} i={0} delta={data.trend?.regDelta} />
         <KpiCard icon={UserCheck} label="Unique Participants" value={num(data.counts.uniqueParticipants)} accent={VIOLET} i={1} />
         <KpiCard icon={CalendarDays} label="Active Schedules" value={num(data.counts.activeSchedules)} accent={EMERALD} i={2} />
+        <KpiCard icon={Repeat} label="Retention (90d)" value={`${data.retention?.rate ?? 0}%`} accent={INDIGO} i={3} />
       </div>
 
       {/* Finance headline */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <KpiCard icon={Wallet} label="Expected" value={money(data.finance.expected)} accent={INDIGO} i={0} small />
-        <KpiCard icon={Wallet} label="Collected" value={money(data.finance.collected)} accent={EMERALD} i={1} small />
+        <KpiCard icon={Wallet} label="Collected" value={money(data.finance.collected)} accent={EMERALD} i={1} small delta={data.trend?.cashDelta} />
         <KpiCard icon={AlertCircle} label="Outstanding" value={money(data.finance.outstanding)} accent={RED} i={2} small />
         <KpiCard icon={TrendingUp} label="Collection Rate" value={`${data.finance.collectionRate}%`} accent={INDIGO} i={3} small />
       </div>
@@ -123,10 +130,10 @@ function DashboardPage() {
         </Panel>
 
         {/* Revenue over time */}
-        <Panel title="Revenue Over Time" subtitle="Expected vs collected by month" i={1}>
+        <Panel title="Revenue Over Time" subtitle="Expected vs collected, with expense break-even line" i={1}>
           {(data.revenueByMonth ?? []).length === 0 ? <Empty note="Set schedule prices to see revenue." /> : (
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={data.revenueByMonth}>
+              <ComposedChart data={revenueWithExpenses}>
                 <defs>
                   <linearGradient id="gExp" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={INDIGO} stopOpacity={0.2} /><stop offset="95%" stopColor={INDIGO} stopOpacity={0.01} />
@@ -138,11 +145,12 @@ function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.2)" />
                 <XAxis dataKey="month" stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} />
-                <RTooltip contentStyle={tooltipStyle} />
+                <RTooltip contentStyle={tooltipStyle} formatter={(v: any) => money(Number(v))} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Area type="monotone" dataKey="expected" name="Expected" stroke={INDIGO} strokeWidth={2} fill="url(#gExp)" />
                 <Area type="monotone" dataKey="collected" name="Collected" stroke={EMERALD} strokeWidth={2} fill="url(#gCol)" />
-              </AreaChart>
+                <Line type="monotone" dataKey="expenses" name="Expenses (break-even)" stroke={RED} strokeWidth={2} strokeDasharray="5 4" dot={false} />
+              </ComposedChart>
             </ResponsiveContainer>
           )}
         </Panel>
@@ -161,6 +169,89 @@ function DashboardPage() {
             </ResponsiveContainer>
           )}
         </Panel>
+
+        {/* By venue */}
+        <Panel title="Registrations by Venue" subtitle="Which venues host the most players?" i={11}>
+          {(data.byVenue ?? []).length === 0 ? <Empty note="No venue data yet." /> : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={data.byVenue} layout="vertical" margin={{ left: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.2)" />
+                <XAxis type="number" stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                <YAxis type="category" dataKey="venue" stroke={SLATE} fontSize={10} tickLine={false} axisLine={false} width={90} />
+                <RTooltip contentStyle={tooltipStyle} />
+                <Bar dataKey="registrations" name="Registrations" fill={VIOLET} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Panel>
+
+        {/* Revenue by venue */}
+        <Panel title="Revenue by Venue" subtitle="Collected revenue per venue" i={12}>
+          {(data.byVenue ?? []).filter((v: any) => v.collected > 0).length === 0 ? <Empty note="No revenue by venue yet." /> : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={(data.byVenue ?? []).filter((v: any) => v.collected > 0)} layout="vertical" margin={{ left: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.2)" />
+                <XAxis type="number" stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="venue" stroke={SLATE} fontSize={10} tickLine={false} axisLine={false} width={90} />
+                <RTooltip contentStyle={tooltipStyle} formatter={(v: any) => money(Number(v))} />
+                <Bar dataKey="collected" name="Collected" fill={EMERALD} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Panel>
+
+        {/* Per-schedule profitability */}
+        <Panel title="Profit by Event" subtitle="Collected revenue minus each event's own expenses" i={13}>
+          {(data.perSchedule ?? []).length === 0 ? <Empty note="No priced events yet." /> : (
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={data.perSchedule} layout="vertical" margin={{ left: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.2)" />
+                <XAxis type="number" stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" stroke={SLATE} fontSize={10} tickLine={false} axisLine={false} width={90} />
+                <RTooltip contentStyle={tooltipStyle} formatter={(v: any) => money(Number(v))} />
+                <Bar dataKey="net" name="Net" radius={[0, 4, 4, 0]}>
+                  {(data.perSchedule ?? []).map((s: any, i: number) => <Cell key={i} fill={s.net >= 0 ? EMERALD : RED} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Panel>
+
+        {/* New vs returning (provisional) */}
+        <Panel title="New vs Returning" subtitle="Player growth by month — estimate until identity is unified" i={14}>
+          {(data.newVsReturning ?? []).length === 0 ? <Empty note="Not enough history yet." /> : (
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={data.newVsReturning}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.2)" />
+                <XAxis dataKey="month" stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                <RTooltip contentStyle={tooltipStyle} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="newPlayers" name="New" stackId="p" fill={INDIGO} radius={[0, 0, 0, 0]} />
+                <Bar dataKey="returningPlayers" name="Returning" stackId="p" fill={EMERALD} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Panel>
+
+        {/* Fill rate by schedule */}
+        {(data.bySchedule ?? []).some((s: any) => s.fillRate != null) && (
+          <Panel title="Fill Rate by Schedule" subtitle="Registrations vs capacity (%)" i={15}>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={(data.bySchedule ?? []).filter((s: any) => s.fillRate != null)} layout="vertical" margin={{ left: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148,163,184,0.2)" />
+                <XAxis type="number" stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} domain={[0, 100]} />
+                <YAxis type="category" dataKey="name" stroke={SLATE} fontSize={10} tickLine={false} axisLine={false} width={90} />
+                <RTooltip contentStyle={tooltipStyle} formatter={(v: any) => `${v}%`} />
+                <Bar dataKey="fillRate" name="Fill %" radius={[0, 4, 4, 0]}>
+                  {(data.bySchedule ?? []).filter((s: any) => s.fillRate != null).map((s: any, i: number) => (
+                    <Cell key={i} fill={s.fillRate >= 80 ? EMERALD : s.fillRate >= 50 ? AMBER : RED} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </Panel>
+        )}
 
         {/* Payment status */}
         <Panel title="Payment Status" subtitle="How much is still owed?" i={5}>
@@ -271,7 +362,9 @@ const tooltipStyle = {
 }
 
 // KPI card with the prototype's corner-accent + hover-lift polish, on our theme.
-function KpiCard({ icon: Icon, label, value, accent, i, small }: { icon: any; label: string; value: any; accent: string; i: number; small?: boolean }) {
+function KpiCard({ icon: Icon, label, value, accent, i, small, delta }: { icon: any; label: string; value: any; accent: string; i: number; small?: boolean; delta?: number | null }) {
+  const showDelta = delta !== undefined
+  const up = (delta ?? 0) >= 0
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: i * 0.05 }}
@@ -282,6 +375,11 @@ function KpiCard({ icon: Icon, label, value, accent, i, small }: { icon: any; la
       </div>
       <span className="text-[10px] font-bold uppercase tracking-wider text-[rgb(var(--muted-fg))] block">{label}</span>
       <span className={`${small ? 'text-xl' : 'text-3xl'} font-extrabold tracking-tight block mt-1`} style={{ color: accent }}>{value}</span>
+      {showDelta && (
+        <span className={`text-[10px] font-bold ${delta === null ? 'text-[rgb(var(--muted-fg))]' : up ? 'text-emerald-500' : 'text-red-500'}`}>
+          {delta === null ? '— vs last 30d' : `${up ? '▲' : '▼'} ${Math.abs(delta)}% vs last 30d`}
+        </span>
+      )}
     </motion.div>
   )
 }
