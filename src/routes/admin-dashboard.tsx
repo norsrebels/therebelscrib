@@ -34,6 +34,7 @@ function DashboardPage() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [cashGrain, setCashGrain] = useState<'week' | 'month' | 'year'>('month')
 
   useEffect(() => {
     getExecutiveDashboard()
@@ -150,6 +151,32 @@ function DashboardPage() {
                 <Area type="monotone" dataKey="expected" name="Expected" stroke={INDIGO} strokeWidth={2} fill="url(#gExp)" />
                 <Area type="monotone" dataKey="collected" name="Collected" stroke={EMERALD} strokeWidth={2} fill="url(#gCol)" />
                 <Line type="monotone" dataKey="expenses" name="Expenses (break-even)" stroke={RED} strokeWidth={2} strokeDasharray="5 4" dot={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </Panel>
+
+        {/* Cash flow — revenue vs expenses, clickable week/month/year */}
+        <Panel title="Cash Flow" subtitle="Collected revenue vs expenses over time" i={2}>
+          <div className="flex gap-1.5 mb-3">
+            {(['week', 'month', 'year'] as const).map((g) => (
+              <button key={g} onClick={() => setCashGrain(g)}
+                className={`text-[11px] font-bold px-3 py-1.5 rounded-lg border capitalize transition-colors ${cashGrain === g ? 'border-[rgb(var(--accent-500))] bg-[rgb(var(--accent-500))]/10 text-[rgb(var(--accent-600))]' : 'border-[rgb(var(--border-soft))]'}`}>
+                {g === 'week' ? 'Weekly' : g === 'month' ? 'Monthly' : 'Yearly'}
+              </button>
+            ))}
+          </div>
+          {(data.cashFlow?.[cashGrain] ?? []).length === 0 ? <Empty note="No cash-flow data for this range yet." /> : (
+            <ResponsiveContainer width="100%" height={240}>
+              <ComposedChart data={data.cashFlow[cashGrain]}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.2)" />
+                <XAxis dataKey="period" stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke={SLATE} fontSize={11} tickLine={false} axisLine={false} />
+                <RTooltip contentStyle={tooltipStyle} formatter={(v: any) => money(Number(v))} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line type="monotone" dataKey="collected" name="Revenue" stroke={EMERALD} strokeWidth={2.5} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="expenses" name="Expenses" stroke={RED} strokeWidth={2.5} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="net" name="Net" stroke={INDIGO} strokeWidth={2} strokeDasharray="5 4" dot={false} />
               </ComposedChart>
             </ResponsiveContainer>
           )}
