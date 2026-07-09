@@ -271,6 +271,52 @@ export const getExecutiveDashboard = createServerFn({ method: 'GET' }).handler(a
       }
     }, [])
 
+    // ─── Cash flow (collected revenue vs expenses) at three granularities ─────
+    // One helper builds a revenue+expense series bucketed by week / month / year,
+    // so the dashboard chart can switch grain on click without extra round-trips.
+    // Windows: 12 weeks / 12 months / 5 years — enough context without clutter.
+    const cashFlowSeries = async (grain: 'week' | 'month' | 'year') => {
+      const fmt = grain === 'week' ? 'IYYY-"W"IW' : grain === 'year' ? 'YYYY' : 'YYYY-MM'
+      const window = grain === 'week' ? sql`interval '12 weeks'` : grain === 'year' ? sql`interval '5 years'` : sql`interval '12 months'`
+      const rev = await safe(async () => {
+        const r = await db.execute(sql`
+          SELECT to_char(date_trunc(${grain}, created_at), ${fmt}) AS bucket,
+                 COALESCE(SUM(amount_paid), 0)::numeric AS collected
+          FROM registrations
+          WHERE status != 'cancelled' AND created_at >= now() - ${window}
+          GROUP BY 1
+        `)
+        return r.rows as any[]
+      }, [])
+      const exp = await safe(async () => {
+        try {
+          const r = await db.execute(sql`
+            SELECT to_char(date_trunc(${grain}, COALESCE(expense_date, created_at::date)), ${fmt}) AS bucket,
+                   COALESCE(SUM(amount), 0)::numeric AS expenses
+            FROM expenses
+            WHERE archived_at IS NULL AND COALESCE(expense_date, created_at::date) >= (now() - ${window})::date
+            GROUP BY 1
+          `)
+          return r.rows as any[]
+        } catch { return [] }
+      }, [])
+      // Merge revenue + expenses on the bucket label, filling gaps with 0.
+      const map: Record<string, { period: string; collected: number; expenses: number }> = {}
+      for (const row of rev) map[row.bucket] = { period: row.bucket, collected: Number(row.collected), expenses: 0 }
+      for (const row of exp) {
+        map[row.bucket] = map[row.bucket] || { period: row.bucket, collected: 0, expenses: 0 }
+        map[row.bucket].expenses = Number(row.expenses)
+      }
+      return Object.values(map)
+        .map((v) => ({ ...v, net: Number((v.collected - v.expenses).toFixed(2)) }))
+        .sort((a, b) => a.period.localeCompare(b.period))
+    }
+    const cashFlow = {
+      week: await cashFlowSeries('week'),
+      month: await cashFlowSeries('month'),
+      year: await cashFlowSeries('year'),
+    }
+
     // ─── Outstanding aging: unpaid balance bucketed by how old the registration is ─
     const aging = await safe(async () => {
       const r = await db.execute(sql`
@@ -366,6 +412,7 @@ export const getExecutiveDashboard = createServerFn({ method: 'GET' }).handler(a
       },
       expenseByCategory: expenseByCategory.map((e) => ({ category: e.category, total: Number(e.total) })),
       expenseByMonth: expenseByMonth.map((e) => ({ month: e.month, total: Number(e.total) })),
+      cashFlow,
       revenueByMonth: revenueByMonth.map((m) => ({
         month: m.month,
         expected: Number(m.expected),
