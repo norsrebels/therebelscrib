@@ -54,7 +54,7 @@ import {
   Upload,
   BarChart2,
 } from "lucide-react";
-import { Save, Check, AlertTriangle, Copy, Globe, Radio, ChevronRight, Share2, Trophy, Image as ImageIcon } from "lucide-react";
+import { Save, Check, AlertTriangle, Copy, Globe, Radio, ChevronRight, Share2, Trophy, Image as ImageIcon, Users, TrendingUp, BarChart3, Settings as SettingsIcon, Search } from "lucide-react";
 import { uploadPlayerImage } from "../server/player.functions";
 import { VISStatsTab } from "./VISStatsTab";
 
@@ -1039,6 +1039,8 @@ function MatchesTab({
   const [showRemoveModal, setShowRemoveModal] = useState(false);
   const [showDEModal, setShowDEModal] = useState(false);
   const [showRemoveDEModal, setShowRemoveDEModal] = useState(false);
+  const [matchSearch, setMatchSearch] = useState("");
+  const [matchFilter, setMatchFilter] = useState<"all" | "A" | "B" | "live" | "done" | "todo">("all");
 
   const updateMatch = (id: string, updates: Partial<PoolMatch>) => {
     setState({
@@ -1211,6 +1213,24 @@ function MatchesTab({
 
   const sortedMatches = state.poolMatches.slice().sort((a, b) => a.gameNum - b.gameNum);
 
+  // Search + filter (patterned after the reference Pool Schedule screen).
+  const teamName = (id: string | null) => state.teams.find((t) => t.id === id)?.name ?? "";
+  const matchIsDone = (m: PoolMatch) => m.isFinal || (m.scoreA !== null && m.scoreB !== null);
+  const matchIsLive = (m: PoolMatch) => !matchIsDone(m) && (m.scoreA !== null || m.scoreB !== null);
+  const q = matchSearch.trim().toLowerCase();
+  const filteredMatches = sortedMatches.filter((m) => {
+    if (matchFilter === "A" && m.pool !== "A") return false;
+    if (matchFilter === "B" && m.pool !== "B") return false;
+    if (matchFilter === "done" && !matchIsDone(m)) return false;
+    if (matchFilter === "live" && !matchIsLive(m)) return false;
+    if (matchFilter === "todo" && (matchIsDone(m) || matchIsLive(m))) return false;
+    if (q) {
+      const hay = `${teamName(m.teamAId)} ${teamName(m.teamBId)} ${m.court ?? ""} pool ${m.pool}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
   return (
     <div className="space-y-8">
       <ConfirmationModal
@@ -1276,12 +1296,52 @@ function MatchesTab({
               )}
             </div>
           </div>
+
+          {/* Search + progress + filters (patterned after the reference screen) */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex-1 min-w-[180px] flex items-center gap-2 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] rounded-xl px-3 py-2">
+              <Search size={14} className="text-[rgb(var(--muted-fg))]" />
+              <input
+                value={matchSearch}
+                onChange={(e) => setMatchSearch(e.target.value)}
+                placeholder="Search matches or courts…"
+                className="flex-1 bg-transparent text-sm text-[rgb(var(--fg))] placeholder:text-[rgb(var(--muted-fg))] focus:outline-none"
+              />
+            </div>
+            <span className="text-[11px] font-bold text-[rgb(var(--muted-fg))] whitespace-nowrap">
+              Showing {filteredMatches.length} of {state.poolMatches.length} games
+            </span>
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {([
+              ["all", "All"], ["A", "Pool A"], ["B", "Pool B"],
+              ["live", "In progress"], ["done", "Final"], ["todo", "Upcoming"],
+            ] as const).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setMatchFilter(v)}
+                className={cn(
+                  "text-[11px] font-bold px-3 py-1.5 rounded-full border transition-colors",
+                  matchFilter === v
+                    ? "border-blue-500 bg-blue-500/10 text-blue-500"
+                    : "border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <div className="grid gap-3">
-            {sortedMatches.map((m, i) => {
+            {filteredMatches.length === 0 ? (
+              <div className="text-center py-10 text-[rgb(var(--muted-fg))] text-sm">
+                No matches match your search or filter.
+              </div>
+            ) : filteredMatches.map((m, i) => {
               const isFirstR2 =
                 has2nd &&
                 m.round > round1Boundary &&
-                (i === 0 || sortedMatches[i - 1].round <= round1Boundary);
+                (i === 0 || filteredMatches[i - 1].round <= round1Boundary);
               return (
                 <div key={m.id}>
                   {i === 0 && has2nd && (
@@ -1416,14 +1476,21 @@ function MatchesTab({
                         onChange={(e) => updateCourt(g.slot, e.target.value)}
                       />
                     </div>
-                    <span
-                      className={cn(
-                        "text-[10px] font-bold tracking-normal ",
-                        PHASE_COLORS[g.phase as PlayoffPhase],
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "text-[9px] font-bold tracking-wide uppercase px-2 py-0.5 rounded border",
+                          PHASE_COLORS[g.phase as PlayoffPhase],
+                        )}
+                      >
+                        {PHASE_LABELS[g.phase as PlayoffPhase] || g.label}
+                      </span>
+                      {(!g.teamAId || !g.teamBId) && (
+                        <span className="text-[9px] font-bold text-[rgb(var(--muted-fg))] flex items-center gap-1">
+                          <Clock size={10} /> Waiting for teams
+                        </span>
                       )}
-                    >
-                      {g.label}
-                    </span>
+                    </div>
                   </div>
 
                   {/* Per-phase best-of toggle */}
@@ -1541,18 +1608,23 @@ function MatchesTab({
                                 L
                               </span>
                             )}
-                            <span
-                              className={cn(
-                                "text-sm font-semibold truncate",
-                                isWinner
-                                  ? "text-[rgb(var(--fg))]"
-                                  : isComplete
-                                    ? "text-[rgb(var(--muted-fg))]"
-                                    : "text-[rgb(var(--fg))]",
-                                !row.t && "text-[rgb(var(--muted-fg))] italic",
+                            <span className="flex flex-col min-w-0">
+                              <span
+                                className={cn(
+                                  "text-sm font-semibold truncate",
+                                  isWinner
+                                    ? "text-[rgb(var(--fg))]"
+                                    : isComplete
+                                      ? "text-[rgb(var(--muted-fg))]"
+                                      : "text-[rgb(var(--fg))]",
+                                  !row.t && "text-[rgb(var(--muted-fg))] italic",
+                                )}
+                              >
+                                {row.t?.name ?? row.lbl}
+                              </span>
+                              {row.t && row.lbl && row.lbl !== row.t.name && (
+                                <span className="text-[10px] text-[rgb(var(--muted-fg))] truncate">{row.lbl}</span>
                               )}
-                            >
-                              {row.t?.name ?? row.lbl}
                             </span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
@@ -1655,7 +1727,23 @@ function LeaderboardTab({ state }: { state: TournamentState }) {
                   const h2hResults = h2hMap[s.team.id] ?? {};
                   return (
                     <tr key={s.team.id} className="border-b border-[rgb(var(--border-soft))] last:border-0 hover:bg-[rgb(var(--bg))]">
-                      <td className="py-3 px-4 text-[rgb(var(--muted-fg))] font-mono text-xs">{s.rank}</td>
+                      <td className="py-3 px-4">
+                        {s.rank <= 2 ? (
+                          <span
+                            className={cn(
+                              "inline-flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-extrabold",
+                              s.rank === 1
+                                ? "bg-amber-500/20 text-amber-500 border border-amber-500/40"
+                                : "bg-[rgb(var(--surface-hover))] text-[rgb(var(--fg))] border border-[rgb(var(--border-strong))]",
+                            )}
+                            title={s.rank <= 2 ? "Advances (top 2)" : undefined}
+                          >
+                            {s.rank}
+                          </span>
+                        ) : (
+                          <span className="text-[rgb(var(--muted-fg))] font-mono text-xs pl-1.5">{s.rank}</span>
+                        )}
+                      </td>
                       <td className="py-3 px-4 font-semibold text-[rgb(var(--fg))]">{s.team.name}</td>
                       <td className="py-3 px-4 font-bold text-green-400">{s.wins}</td>
                       <td className="py-3 px-4 text-red-400">{s.losses}</td>
@@ -1725,6 +1813,24 @@ function LeaderboardTab({ state }: { state: TournamentState }) {
     <div className={singlePool ? "max-w-2xl" : ""}>
       {sA.length > 0 && renderTable(sA, singlePool ? "Standings" : "Pool A Standings")}
       {sB.length > 0 && renderTable(sB, singlePool ? "Standings" : "Pool B Standings")}
+
+      {(sA.length > 0 || sB.length > 0) && (
+        <div className="glass border border-[rgb(var(--border-soft))] rounded-xl p-4 mt-2">
+          <h4 className="text-xs font-bold text-[rgb(var(--fg))] mb-2 flex items-center gap-1.5">
+            <TrendingUp size={13} /> Standings &amp; Tiebreaking Sequence
+          </h4>
+          <p className="text-[11px] text-[rgb(var(--muted-fg))] mb-2">In the event of a tie in win records, standings are sorted by:</p>
+          <ol className="text-[11px] text-[rgb(var(--muted-fg))] space-y-1 list-decimal pl-4">
+            <li><span className="font-bold text-[rgb(var(--fg))]">Wins record</span> — higher win count is ranked higher.</li>
+            <li><span className="font-bold text-[rgb(var(--fg))]">Head-to-head (H2H)</span> — for a 2-way tie, the winner of their direct match is ranked higher.</li>
+            <li><span className="font-bold text-[rgb(var(--fg))]">Points For (PF)</span> — total score points earned.</li>
+            <li><span className="font-bold text-[rgb(var(--fg))]">Points Quotient (PF÷PA)</span> — higher quotient wins.</li>
+          </ol>
+          {state.settings.formatType === "pool2" && (
+            <p className="text-[11px] text-amber-500 mt-2 font-bold">Top 2 of each pool (highlighted) advance to the semi-finals.</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -3084,6 +3190,34 @@ export default function TournamentApp({
         </div>
       </div>
 
+      {/* Status strip — at-a-glance tournament state (patterned after reference UI) */}
+      {defaultView !== "players" && (() => {
+        const teamCount = state.teams.length;
+        const poolTotal = state.poolMatches.length;
+        const poolDone = state.poolMatches.filter((m) => m.isFinal || (m.scoreA !== null && m.scoreB !== null)).length;
+        const poTotal = state.playoffGames.length;
+        const poDone = state.playoffGames.filter((g) => g.isFinal || (g.scoreA !== null && g.scoreB !== null)).length;
+        const fmtLabel =
+          state.settings.formatType === "pool2" ? "Top 2 Pool-Play"
+          : state.settings.useDEBracket ? "Double Elimination"
+          : "Bracket Auto-fit";
+        const chip = "flex items-center gap-1.5 text-[rgb(var(--muted-fg))]";
+        return (
+          <div className="glass border-b border-[rgb(var(--border-soft))] py-2 px-4 sm:px-6 flex flex-wrap gap-x-5 gap-y-1.5 items-center text-[11px] font-bold">
+            <span className={chip}><Users size={12} /> {teamCount} Teams Registered</span>
+            <span className={chip}><Calendar size={12} /> {poolDone}/{poolTotal} Pool Matches Completed</span>
+            <span className={chip}><Trophy size={12} /> {poDone}/{poTotal} Playoff Matches Resolved</span>
+            <span className="flex-1" />
+            <span className="px-2 py-0.5 rounded border border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]">
+              Rules: {state.settings.maxScore ?? "—"} points{state.settings.leadScore ? ` | Win by ${state.settings.leadScore}` : ""}
+            </span>
+            <span className="px-2 py-0.5 rounded border border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]">
+              Format: {fmtLabel}
+            </span>
+          </div>
+        );
+      })()}
+
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
         {defaultView === "players" ? (
           <LiveIntroSplash>
@@ -3091,29 +3225,51 @@ export default function TournamentApp({
           </LiveIntroSplash>
         ) : (
           <>
-            <div className="flex gap-1 mb-6 glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-1.5 overflow-x-auto">
+            <div className="flex gap-1 mb-6 glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-1.5 overflow-x-auto sticky top-0 z-30">
               {(
                 [
-                  "Teams",
-                  "Matches",
-                  "Standings",
-                  "VIS Stats",
-                  "Settings",
+                  { id: "Teams", label: "Teams", icon: Users },
+                  { id: "Matches", label: "Matches", icon: Calendar },
+                  { id: "Standings", label: "Standings", icon: TrendingUp },
+                  { id: "VIS Stats", label: "VIS Stats", icon: BarChart3 },
+                  { id: "Settings", label: "Settings", icon: SettingsIcon },
                 ] as const
-              ).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={cn(
-                    "px-4 py-2 rounded-xl text-xs font-bold tracking-normal  whitespace-nowrap transition-colors",
-                    tab === t
-                      ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm rounded-full"
-                      : "text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]",
-                  )}
-                >
-                  {t}
-                </button>
-              ))}
+              ).map((t) => {
+                const Icon = t.icon;
+                const active = tab === t.id;
+                // Live count badges (patterned after the reference screens).
+                const badge =
+                  t.id === "Teams" && state.teams.length > 0
+                    ? String(state.teams.length)
+                    : t.id === "Matches" && state.poolMatches.length > 0
+                    ? `${state.poolMatches.filter((m) => !m.isFinal && (m.scoreA === null || m.scoreB === null)).length} left`
+                    : null;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setTab(t.id)}
+                    className={cn(
+                      "flex items-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold tracking-normal whitespace-nowrap transition-colors",
+                      active
+                        ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
+                        : "text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))]",
+                    )}
+                  >
+                    <Icon size={15} />
+                    <span className="hidden sm:inline">{t.label}</span>
+                    {badge && (
+                      <span
+                        className={cn(
+                          "px-1.5 py-0.5 text-[10px] rounded-full font-bold",
+                          active ? "bg-white text-blue-700" : "bg-[rgb(var(--surface-hover))] text-[rgb(var(--muted-fg))]",
+                        )}
+                      >
+                        {badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             {tab === "Teams" && <TeamsTab state={state} setState={setState} />}
