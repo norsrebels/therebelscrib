@@ -1,4 +1,4 @@
-  // ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
   export type Pool = 'A' | 'B'
 
@@ -57,7 +57,9 @@
 
   // 'auto'  = derive bracket from team counts (all existing formats)
   // 'de'    = double elimination playoffs (any team count, single pool)
-  export type FormatType = 'auto' | 'de'
+  // 'pool2' = double-pool: top 2 from EACH pool advance → semis / bronze / final.
+  //           Works for ANY pool sizes (>=2 per pool) — always yields 4 qualifiers.
+  export type FormatType = 'auto' | 'de' | 'pool2'
 
   export interface PlayoffGame {
     slot: string // G21–G30
@@ -93,6 +95,11 @@
     // deBye: which seed number gets the bye in odd-team DE (e.g. 3 = Seed #3 sits out W-R1)
     useDEBracket?: boolean
     deBye?: number
+    // Per-phase best-of series length (1 = single game, 3 = best-of-3 / first to 2).
+    // Only phases listed here use a series; anything absent defaults to Bo1 — so
+    // every existing format is unaffected unless explicitly configured.
+    // Example: { semifinal: 3, '3rd_place': 1, championship: 3 }
+    seriesByPhase?: Partial<Record<PlayoffPhase, 1 | 3>>
   }
 
   export interface TournamentState {
@@ -217,6 +224,55 @@
 
   // ─── Game Completion Helper ──────────────────────────────────────────────────
 
+  // How many set-wins a team needs for a given phase (3 => first to 2; else 1).
+  export function setsToWin(phase: PlayoffPhase, settings?: Settings): number {
+    const len = settings?.seriesByPhase?.[phase]
+    return len === 3 ? 2 : 1
+  }
+
+  // Count set-wins in a game's sets[] array (used for Bo3 series).
+  function countSetWins(game: { sets?: { scoreA: number; scoreB: number }[] }): { a: number; b: number } {
+    let a = 0, b = 0
+    for (const s of game.sets ?? []) {
+      if (s.scoreA > s.scoreB) a++
+      else if (s.scoreB > s.scoreA) b++
+    }
+    return { a, b }
+  }
+
+  // Is a playoff game (single or series) complete? For Bo1 phases this is identical
+  // to isGameComplete (so existing formats are unchanged); for Bo3 it checks whether
+  // either side has reached the needed set-wins.
+  export function isPlayoffGameComplete(
+    game: { scoreA: number | null; scoreB: number | null; isFinal?: boolean; phase?: PlayoffPhase; sets?: { scoreA: number; scoreB: number }[] },
+    maxScore: number | null, leadScore: number | null, settings?: Settings,
+  ): boolean {
+    const need = game.phase ? setsToWin(game.phase, settings) : 1
+    if (need > 1) {
+      const { a, b } = countSetWins(game)
+      return a >= need || b >= need
+    }
+    return isGameComplete(game, maxScore, leadScore)
+  }
+
+  // Winner side ('A' | 'B' | null) of a playoff game, honoring Bo3 series.
+  export function playoffWinnerSide(
+    game: { scoreA: number | null; scoreB: number | null; isFinal?: boolean; phase?: PlayoffPhase; sets?: { scoreA: number; scoreB: number }[] },
+    maxScore: number | null, leadScore: number | null, settings?: Settings,
+  ): 'A' | 'B' | null {
+    const need = game.phase ? setsToWin(game.phase, settings) : 1
+    if (need > 1) {
+      const { a, b } = countSetWins(game)
+      if (a >= need) return 'A'
+      if (b >= need) return 'B'
+      return null
+    }
+    if (!isGameComplete(game, maxScore, leadScore)) return null
+    if (game.scoreA! > game.scoreB!) return 'A'
+    if (game.scoreB! > game.scoreA!) return 'B'
+    return null
+  }
+
   export function isGameComplete(match: { scoreA: number | null, scoreB: number | null, isFinal?: boolean }, maxScore: number | null, leadScore: number | null = null): boolean {
     if (match.isFinal) return true
     if (match.scoreA === null || match.scoreB === null) return false
@@ -257,6 +313,17 @@
     const teams = [...teamIds]
     if (teams.length < 2) return []
 
+    // Single pool - 3 teams: verified round-robin (3 rounds, 3 games).
+    if (teams.length === 3) {
+      const [t1, t2, t3] = teams
+      const rounds: Array<Array<[string, string]>> = [
+        [[t2, t3]],   // R1: G1
+        [[t1, t3]],   // R2: G2
+        [[t1, t2]],   // R3: G3
+      ]
+      return generateFixedRounds(rounds, pool)
+    }
+
     // Single pool - 4 teams: 1v2, 3v4, 1v3, 2v4, 2v3, 1v4
     if (teams.length === 4) {
       const [t1, t2, t3, t4] = teams
@@ -281,15 +348,33 @@
       return generateFixedRounds(rounds, pool)
     }
 
-    // Single pool - 6 teams: exact matchup order per tournament format
+    // Single pool - 6 teams: verified complete round-robin (5 rounds, 15 games).
+    // Anchor T1, rotate the rest (same circle method as the 8-team table). Every
+    // team plays exactly once per round; all 15 unique pairings occur once.
     if (teams.length === 6) {
       const [t1, t2, t3, t4, t5, t6] = teams
       const rounds: Array<Array<[string, string]>> = [
-        [[t1, t2], [t3, t4], [t5, t6]],   // G1-G3
-        [[t1, t3], [t2, t5], [t4, t6]],   // G4-G6
-        [[t1, t4], [t3, t6], [t2, t4]],   // G7-G9 (Note: G9 is T2 vs T4)
-        [[t1, t5], [t3, t5], [t2, t6]],   // G10-G12
-        [[t1, t6], [t2, t3], [t4, t5]],   // G13-G15
+        [[t1, t6], [t2, t5], [t3, t4]],   // R1: G1-G3
+        [[t1, t5], [t6, t4], [t2, t3]],   // R2: G4-G6
+        [[t1, t4], [t5, t3], [t6, t2]],   // R3: G7-G9
+        [[t1, t3], [t4, t2], [t5, t6]],   // R4: G10-G12
+        [[t1, t2], [t3, t6], [t4, t5]],   // R5: G13-G15
+      ]
+      return generateFixedRounds(rounds, pool)
+    }
+
+    // Single pool - 7 teams: verified complete round-robin (7 rounds, 21 games).
+    // Odd count → one team rests each round (circle method, BYE dropped).
+    if (teams.length === 7) {
+      const [t1, t2, t3, t4, t5, t6, t7] = teams
+      const rounds: Array<Array<[string, string]>> = [
+        [[t2, t7], [t3, t6], [t4, t5]],   // R1
+        [[t1, t7], [t2, t5], [t3, t4]],   // R2
+        [[t1, t6], [t7, t5], [t2, t3]],   // R3
+        [[t1, t5], [t6, t4], [t7, t3]],   // R4
+        [[t1, t4], [t5, t3], [t6, t2]],   // R5
+        [[t1, t3], [t4, t2], [t6, t7]],   // R6
+        [[t1, t2], [t4, t7], [t5, t6]],   // R7
       ]
       return generateFixedRounds(rounds, pool)
     }
@@ -522,7 +607,7 @@
     teamBLabel: string
   }
 
-  export function buildBracketTemplate(poolA: number, poolB: number, variant: 'auto' | 'de' = 'auto', deBye?: number): BracketSlot[] {
+  export function buildBracketTemplate(poolA: number, poolB: number, variant: 'auto' | 'de' | 'pool2' = 'auto', deBye?: number): BracketSlot[] {
     // ── Double Elimination (any single-pool count) ─────────────────────────────
     // Only triggered when explicitly requested via the Generate DE button.
     // Supports 4, 5, 6, and 8 teams in a single pool.
@@ -627,6 +712,20 @@
       // DE not defined for this team count — fall through to auto
     }
 
+    // ── Pool2 (double-pool, top-2-per-pool → semis / bronze / final) ───────────
+    // Variant-based, so it's independent of pool sizes: any A/B counts >= 2 yield
+    // exactly 4 qualifiers. Cross-pool seeding keeps pool winners apart until the
+    // final. Slot numbering is self-contained (G21–G24) and does not collide with
+    // any other template (each template's slots are independent).
+    if (variant === 'pool2') {
+      return [
+        { slot: 'G21', phase: 'semifinal',    label: 'Semi-Final 1',      teamALabel: 'Pool A #1', teamBLabel: 'Pool B #2' },
+        { slot: 'G22', phase: 'semifinal',    label: 'Semi-Final 2',      teamALabel: 'Pool B #1', teamBLabel: 'Pool A #2' },
+        { slot: 'G23', phase: '3rd_place',    label: 'Battle for Third',  teamALabel: 'Loser G21', teamBLabel: 'Loser G22' },
+        { slot: 'G24', phase: 'championship', label: 'Championship',      teamALabel: 'Winner G21', teamBLabel: 'Winner G22' },
+      ]
+    }
+
     // ── Auto (existing formats — untouched) ───────────────────────────────────
     if (poolA === 4 && poolB === 0) {
       return [
@@ -705,6 +804,32 @@
     return []
   }
 
+  // ─── Numbering safety-check ───────────────────────────────────────────────────
+  // Validates that a bracket template is internally consistent: no duplicate slot
+  // IDs, and every "Winner GXX" / "Loser GXX" reference points at a slot that
+  // actually exists in the same template. Returns a list of problems (empty = OK).
+  // This guards the exact class of bug hardcoded numbering invites — without
+  // changing any numbers. Safe to call on any template (existing or new).
+  export function validateBracketTemplate(template: BracketSlot[]): string[] {
+    const problems: string[] = []
+    const slots = template.map((t) => t.slot)
+    const seen = new Set<string>()
+    for (const s of slots) {
+      if (seen.has(s)) problems.push(`Duplicate slot: ${s}`)
+      seen.add(s)
+    }
+    const refRe = /^(?:Winner|Loser) (G\d+)$/
+    for (const t of template) {
+      for (const label of [t.teamALabel, t.teamBLabel]) {
+        const m = label.match(refRe)
+        if (m && !seen.has(m[1])) {
+          problems.push(`Slot ${t.slot} references "${label}" but ${m[1]} is not in this template`)
+        }
+      }
+    }
+    return problems
+  }
+
   // ─── Bracket Resolution ───────────────────────────────────────────────────────
 
   export function resolvePlayoffGames(
@@ -714,6 +839,7 @@
     existingGames: PlayoffGame[],
     maxScore: number | null = null,
     leadScore: number | null = null,
+    settings?: Settings,
   ): PlayoffGame[] {
     const poolA = computeStandings(teams, poolMatches, 'A', maxScore, leadScore)
     const poolB = computeStandings(teams, poolMatches, 'B', maxScore, leadScore)
@@ -732,18 +858,20 @@
       const winnerMatch = label.match(/^Winner (G\d+)$/)
       if (winnerMatch) {
         const g = existingGames.find((g) => g.slot === winnerMatch[1])
-        if (!g || !isGameComplete(g, maxScore, leadScore)) return null
-        if (g.scoreA! > g.scoreB!) return g.teamAId
-        if (g.scoreB! > g.scoreA!) return g.teamBId
+        if (!g) return null
+        const side = playoffWinnerSide(g, maxScore, leadScore, settings)
+        if (side === 'A') return g.teamAId
+        if (side === 'B') return g.teamBId
         return null
       }
 
       const loserMatch = label.match(/^Loser (G\d+)$/)
       if (loserMatch) {
         const g = existingGames.find((g) => g.slot === loserMatch[1])
-        if (!g || !isGameComplete(g, maxScore, leadScore)) return null
-        if (g.scoreA! < g.scoreB!) return g.teamAId
-        if (g.scoreB! < g.scoreA!) return g.teamBId
+        if (!g) return null
+        const side = playoffWinnerSide(g, maxScore, leadScore, settings)
+        if (side === 'A') return g.teamBId
+        if (side === 'B') return g.teamAId
         return null
       }
 
@@ -763,6 +891,10 @@
         teamBId: getByLabel(t.teamBLabel),
         scoreA: existing?.scoreA ?? null,
         scoreB: existing?.scoreB ?? null,
+        isFinal: existing?.isFinal,
+        serving: existing?.serving,
+        sets: existing?.sets ?? [],
+        pointLog: existing?.pointLog,
       }
     })
 
@@ -772,17 +904,19 @@
       const winnerMatch = label.match(/^Winner (G\d+)$/)
       if (winnerMatch) {
         const g = resolvedMap.get(winnerMatch[1])
-        if (!g || !isGameComplete(g, maxScore, leadScore)) return null
-        if (g.scoreA! > g.scoreB!) return g.teamAId
-        if (g.scoreB! > g.scoreA!) return g.teamBId
+        if (!g) return null
+        const side = playoffWinnerSide(g, maxScore, leadScore, settings)
+        if (side === 'A') return g.teamAId
+        if (side === 'B') return g.teamBId
         return null
       }
       const loserMatch = label.match(/^Loser (G\d+)$/)
       if (loserMatch) {
         const g = resolvedMap.get(loserMatch[1])
-        if (!g || !isGameComplete(g, maxScore, leadScore)) return null
-        if (g.scoreA! < g.scoreB!) return g.teamAId
-        if (g.scoreB! < g.scoreA!) return g.teamBId
+        if (!g) return null
+        const side = playoffWinnerSide(g, maxScore, leadScore, settings)
+        if (side === 'A') return g.teamBId
+        if (side === 'B') return g.teamAId
         return null
       }
       return getByLabel(label)
