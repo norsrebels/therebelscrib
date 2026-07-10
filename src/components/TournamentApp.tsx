@@ -12,6 +12,8 @@ import {
   exportJSON,
   defaultState,
   isGameComplete,
+  isPlayoffGameComplete,
+  setsToWin,
   PHASE_LABELS,
   PHASE_COLORS,
   type TournamentState,
@@ -657,7 +659,24 @@ function TeamsTab({
       </div>
 
       {state.teams.length >= 2 && (
-        <div className="flex justify-center mt-8">
+        <div className="flex flex-col items-center mt-8 gap-3">
+          {(() => {
+            // Warn when the Double-Pool format is selected but the two pools are
+            // uneven (or one is too small) — top-2-per-pool assumes balanced pools.
+            if (state.settings.formatType !== "pool2") return null;
+            const a = state.teams.filter((t) => t.pool === "A").length;
+            const b = state.teams.filter((t) => t.pool === "B").length;
+            if (a >= 2 && b >= 2 && a === b) return null;
+            let msg = "";
+            if (a < 2 || b < 2) msg = `Double Pool needs at least 2 teams in each pool (currently A=${a}, B=${b}).`;
+            else msg = `Pools are uneven (A=${a}, B=${b}). Double Pool advances the top 2 from each pool — even pools are recommended for fairness.`;
+            return (
+              <div className="flex items-start gap-2 max-w-md text-left px-4 py-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10">
+                <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                <span className="text-[11px] text-amber-600 dark:text-amber-400">{msg}</span>
+              </div>
+            );
+          })()}
           <button
             onClick={() => {
               const poolA = state.teams
@@ -1035,18 +1054,22 @@ function MatchesTab({
 
   // DE controls — read from settings, default to false/undefined for all existing tournaments
   const isDE = state.settings.useDEBracket === true;
+  const isPool2 = state.settings.formatType === "pool2";
   const deBye = state.settings.deBye;
 
   // Build the bracket template based on current mode
   // SE (auto): derives bracket from pool counts — all existing formats unchanged
   // DE: uses the double-elimination bracket for this team count
-  const variant = isDE ? "de" : "auto";
+  // pool2: double-pool, top-2-per-pool → semis / bronze / final (any pool sizes)
+  const variant = isPool2 ? "pool2" : isDE ? "de" : "auto";
   const template = buildBracketTemplate(poolA, poolB, variant, deBye);
 
   // Whether a DE bracket is available for the current team count
   // The button hides automatically for counts with no DE defined (e.g. 4+4, 5+5)
   const deBracketExists =
     poolB === 0 && buildBracketTemplate(poolA, poolB, "de").length > 0;
+  // pool2 needs at least 2 teams in each of the two pools.
+  const pool2Available = poolA >= 2 && poolB >= 2;
 
   // Whether any playoff scores have been entered — used to guard the remove DE action
   const playoffHasScores = state.playoffGames.some(
@@ -1060,6 +1083,7 @@ function MatchesTab({
     state.playoffGames,
     state.settings.maxScore,
     state.settings.leadScore,
+    state.settings,
   );
 
   // ── DE handlers ────────────────────────────────────────────────────────────
@@ -1128,6 +1152,35 @@ function MatchesTab({
       newGames.push({ ...g, isFinal: val });
     }
     setState({ ...state, playoffGames: newGames });
+  };
+
+  // Bo3: write a single set's score into game.sets[setIdx].
+  const updateSetScore = (
+    slot: string,
+    setIdx: number,
+    field: "scoreA" | "scoreB",
+    val: string,
+  ) => {
+    const num = val === "" ? 0 : parseInt(val);
+    const newGames = [...state.playoffGames];
+    let idx = newGames.findIndex((g) => g.slot === slot);
+    if (idx < 0) {
+      const g = resolvedPlayoffs.find((x) => x.slot === slot)!;
+      newGames.push({ ...g, sets: [] });
+      idx = newGames.length - 1;
+    }
+    const game = newGames[idx];
+    const sets = [...(game.sets ?? [])];
+    while (sets.length <= setIdx) sets.push({ scoreA: 0, scoreB: 0 });
+    sets[setIdx] = { ...sets[setIdx], [field]: isNaN(num) ? 0 : num };
+    newGames[idx] = { ...game, sets };
+    setState({ ...state, playoffGames: newGames });
+  };
+
+  // Toggle a phase between single game (1) and best-of-3 (3).
+  const setPhaseSeries = (phase: PlayoffPhase, len: 1 | 3) => {
+    const seriesByPhase = { ...(state.settings.seriesByPhase ?? {}), [phase]: len };
+    setState({ ...state, settings: { ...state.settings, seriesByPhase } });
   };
 
   const has2nd = hasSecondRound(state.poolMatches);
@@ -1270,9 +1323,26 @@ function MatchesTab({
             </h3>
             <div className="flex items-center gap-2">
               <span className="px-2 py-0.5 bg-purple-500/10 text-purple-500 text-[10px] font-bold rounded-full">
-                {isDE ? "Double Elim" : "Playoffs"}
+                {isPool2 ? "Double Pool" : isDE ? "Double Elim" : "Playoffs"}
               </span>
-              {!isDE && deBracketExists && (
+              {pool2Available && !isPool2 && !isDE && (
+                <button
+                  onClick={() => setState({ ...state, settings: { ...state.settings, formatType: "pool2" }, playoffGames: [] })}
+                  className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold rounded-full border border-blue-500/50 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 transition-colors"
+                  title="Top 2 from each pool advance to semis / bronze / final"
+                >
+                  <Copy size={10} /> Double Pool
+                </button>
+              )}
+              {isPool2 && !playoffHasScores && (
+                <button
+                  onClick={() => setState({ ...state, settings: { ...state.settings, formatType: "auto" }, playoffGames: [] })}
+                  className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold rounded-full border border-red-500/50 text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors"
+                >
+                  <Trash2 size={10} /> Standard
+                </button>
+              )}
+              {!isDE && !isPool2 && deBracketExists && (
                 <button
                   onClick={() => setShowDEModal(true)}
                   className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold rounded-full border border-orange-500/50 text-orange-400 bg-orange-500/10 hover:bg-orange-500/20 transition-colors"
@@ -1355,7 +1425,77 @@ function MatchesTab({
                       {g.label}
                     </span>
                   </div>
-                  <div className="space-y-2">
+
+                  {/* Per-phase best-of toggle */}
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-[rgb(var(--muted-fg))]">Series:</span>
+                    {([1, 3] as const).map((len) => {
+                      const active = setsToWin(g.phase as PlayoffPhase, state.settings) === (len === 3 ? 2 : 1);
+                      return (
+                        <button
+                          key={len}
+                          onClick={() => setPhaseSeries(g.phase as PlayoffPhase, len)}
+                          disabled={g.isFinal}
+                          className={cn(
+                            "text-[9px] font-bold px-2 py-0.5 rounded border transition-colors disabled:opacity-40",
+                            active
+                              ? "border-blue-500 bg-blue-500/10 text-blue-500"
+                              : "border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]",
+                          )}
+                        >
+                          {len === 1 ? "1 set" : "Best of 3"}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Bo3 set-by-set entry (only when this phase is best-of-3) */}
+                  {setsToWin(g.phase as PlayoffPhase, state.settings) === 2 && (
+                    <div className="mb-3 rounded-lg border border-[rgb(var(--border-soft))] p-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        {[0, 1, 2].map((si) => {
+                          const set = g.sets?.[si];
+                          return (
+                            <div key={si} className="text-center">
+                              <div className="text-[9px] font-bold text-[rgb(var(--muted-fg))] mb-1">Set {si + 1}</div>
+                              <div className="flex items-center justify-center gap-1">
+                                <input
+                                  disabled={g.isFinal}
+                                  type="number" min="0"
+                                  className="w-9 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] text-xs text-center px-1 py-0.5 rounded text-[rgb(var(--fg))]"
+                                  value={set?.scoreA ?? ""}
+                                  onChange={(e) => updateSetScore(g.slot, si, "scoreA", e.target.value)}
+                                />
+                                <span className="text-[9px] text-[rgb(var(--muted-fg))]">-</span>
+                                <input
+                                  disabled={g.isFinal}
+                                  type="number" min="0"
+                                  className="w-9 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] text-xs text-center px-1 py-0.5 rounded text-[rgb(var(--fg))]"
+                                  value={set?.scoreB ?? ""}
+                                  onChange={(e) => updateSetScore(g.slot, si, "scoreB", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {(() => {
+                        const a = (g.sets ?? []).filter((s) => s.scoreA > s.scoreB).length;
+                        const b = (g.sets ?? []).filter((s) => s.scoreB > s.scoreA).length;
+                        const done = a >= 2 || b >= 2;
+                        return (
+                          <div className="text-center mt-2 text-[10px] font-bold">
+                            <span className={done ? "text-emerald-500" : "text-[rgb(var(--muted-fg))]"}>
+                              Series {a}–{b}{done ? " • Complete" : ""}
+                            </span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Single-game score entry — hidden for Bo3 phases */}
+                  <div className={cn("space-y-2", setsToWin(g.phase as PlayoffPhase, state.settings) === 2 && "hidden")}>
                     {[
                       {
                         t: tA,
@@ -1798,18 +1938,18 @@ function LiveView({
     const playoffTemplate = buildBracketTemplate(
       state.teams.filter((t) => t.pool === "A").length,
       state.teams.filter((t) => t.pool === "B").length,
-      state.settings.useDEBracket ? "de" : "auto",
+      state.settings.formatType === "pool2" ? "pool2" : state.settings.useDEBracket ? "de" : "auto",
       state.settings.deBye,
     );
     const playoffGames = resolvePlayoffGames(
       playoffTemplate, state.teams, state.poolMatches, state.playoffGames,
-      state.settings.maxScore, state.settings.leadScore,
+      state.settings.maxScore, state.settings.leadScore, state.settings,
     );
     const playoffCards: LiveGameCard[] = playoffGames.map((game, index) => {
       const teamA = game.teamAId ? state.teams.find((t) => t.id === game.teamAId) : null;
       const teamB = game.teamBId ? state.teams.find((t) => t.id === game.teamBId) : null;
-      const hasAnyScore = game.scoreA !== null || game.scoreB !== null;
-      const isComplete = isGameComplete(game, state.settings.maxScore, state.settings.leadScore);
+      const hasAnyScore = game.scoreA !== null || game.scoreB !== null || (game.sets?.length ?? 0) > 0;
+      const isComplete = isPlayoffGameComplete(game, state.settings.maxScore, state.settings.leadScore, state.settings);
       return {
         id: game.slot,
         type: "playoff" as const,
@@ -2538,6 +2678,89 @@ function SettingsTab({
           />
           <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1">
             When set, a team must lead by at least this many points to win
+          </p>
+        </div>
+
+        {/* Bracket & Playoff Variant — pick the format once, here (unify) */}
+        <div className="pt-4 border-t border-[rgb(var(--border-soft))] mt-4">
+          <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))] mb-1">
+            Bracket &amp; Playoff Variant
+          </h3>
+          <p className="text-[10px] text-[rgb(var(--muted-fg))] mb-3">
+            How the playoffs are structured. Changing this rebuilds the bracket.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {([
+              { key: 'auto', title: 'Standard', desc: 'Bracket derived from team counts' },
+              { key: 'de', title: 'Double Elim', desc: 'Lose twice to be out (single pool)' },
+              { key: 'pool2', title: 'Double Pool', desc: 'Top 2 per pool → semis / bronze / final' },
+            ] as const).map((opt) => {
+              const active =
+                opt.key === 'de'
+                  ? localSettings.useDEBracket === true
+                  : localSettings.formatType === opt.key && !localSettings.useDEBracket
+                  || (opt.key === 'auto' && (localSettings.formatType ?? 'auto') === 'auto' && !localSettings.useDEBracket)
+              return (
+                <button
+                  key={opt.key}
+                  onClick={() =>
+                    setLocalSettings({
+                      ...localSettings,
+                      formatType: opt.key === 'de' ? (localSettings.formatType ?? 'auto') : opt.key,
+                      useDEBracket: opt.key === 'de',
+                    })
+                  }
+                  className={cn(
+                    'p-3 text-left rounded-lg border-2 text-xs transition-all',
+                    active
+                      ? 'border-[rgb(var(--accent-500))] bg-[rgb(var(--accent-500))]/10 text-[rgb(var(--fg))] font-bold'
+                      : 'border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--surface-hover))]',
+                  )}
+                >
+                  <span className="block font-bold text-[rgb(var(--fg))] mb-0.5">{opt.title}</span>
+                  <span className="block text-[10px] text-[rgb(var(--muted-fg))]">{opt.desc}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Playoff Series Format — per-phase Bo1/Bo3, configured once */}
+        <div className="pt-4 border-t border-[rgb(var(--border-soft))] mt-4">
+          <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))] mb-1">
+            Playoff Series Format
+          </h3>
+          <p className="text-[10px] text-[rgb(var(--muted-fg))] mb-3">
+            Choose which playoff phases are a single game or a best-of-3 series.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {([
+              { id: 'semifinal', label: 'Semi-Finals' },
+              { id: 'championship', label: 'Championship' },
+              { id: '3rd_place', label: 'Battle for 3rd' },
+            ] as const).map((ph) => {
+              const currentVal = localSettings.seriesByPhase?.[ph.id] ?? 1
+              return (
+                <div key={ph.id} className="p-3 bg-[rgb(var(--bg))] rounded-lg border border-[rgb(var(--border-soft))]">
+                  <span className="block text-[10px] font-bold text-[rgb(var(--muted-fg))] mb-2">{ph.label}</span>
+                  <select
+                    value={currentVal}
+                    onChange={(e) => {
+                      const nextSeries = { ...(localSettings.seriesByPhase ?? {}) }
+                      nextSeries[ph.id] = parseInt(e.target.value, 10) as 1 | 3
+                      setLocalSettings({ ...localSettings, seriesByPhase: nextSeries })
+                    }}
+                    className="w-full text-xs px-2 py-1.5 bg-[rgb(var(--surface))] text-[rgb(var(--fg))] border border-[rgb(var(--border-soft))] rounded focus:outline-none focus:border-[rgb(var(--accent-500))]"
+                  >
+                    <option value="1">Single Game (Bo1)</option>
+                    <option value="3">Best of 3 Sets (Bo3)</option>
+                  </select>
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-2">
+            Remember to Save Settings. Bo3 games show a 3-set entry grid in the bracket.
           </p>
         </div>
 
