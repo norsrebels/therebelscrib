@@ -7,6 +7,7 @@ import {
   Image,
   Share2,
   Settings,
+  Wrench,
   Menu,
   X,
   Sun,
@@ -139,7 +140,10 @@ export function Sidebar() {
   const allItems = [
     ...NAV_ITEMS,
     ...(isAdmin
-      ? [{ path: '/configuration', label: 'Config', icon: Settings }]
+      ? [
+          { path: '/admin-tools', label: 'Admin Tools', icon: Wrench },
+          { path: '/configuration', label: 'Config', icon: Settings },
+        ]
       : []),
   ]
 
