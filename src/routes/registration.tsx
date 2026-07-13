@@ -7,7 +7,7 @@ import {
   type RosterMember,
 } from '@/server/registration.functions'
 import { getActiveSchedulesWithCommunities } from '@/server/community.functions'
-import { Calendar, MapPin, Users, User, UsersRound, Check, AlertTriangle, ChevronDown, Tag } from 'lucide-react'
+import { Calendar, MapPin, Users, User, UsersRound, Check, AlertTriangle, ChevronDown, Tag, UserPlus, X, Plus, Printer } from 'lucide-react'
 
 export const Route = createFileRoute('/registration')({
   component: RegistrationPage,
@@ -69,8 +69,10 @@ function RegistrationPage() {
   const [email, setEmail] = useState('')
   const [facebookUrl, setFacebookUrl] = useState('')
   const [customAnswers, setCustomAnswers] = useState<Record<string, any>>({})
+  const [guests, setGuests] = useState<{ name: string }[]>([])
+  const [guestsOpen, setGuestsOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<{ waitlisted: boolean } | null>(null)
+  const [result, setResult] = useState<{ waitlisted: boolean; registration?: any; schedule?: RegistrationSchedule } | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -138,9 +140,10 @@ function RegistrationPage() {
           email,
           facebookUrl,
           customAnswers,
+          guests: guests.filter((g) => g.name.trim()),
         },
       })
-      setResult({ waitlisted: res.waitlisted })
+      setResult({ waitlisted: res.waitlisted, registration: res.registration, schedule: selected })
     } catch (err: any) {
       setError(err?.message || 'Something went wrong. Please try again.')
       // If the chosen schedule is gone (e.g. deleted since the page loaded),
@@ -167,17 +170,69 @@ function RegistrationPage() {
   }
 
   if (result) {
+    const reg = result.registration
+    const sch = result.schedule
+    const fieldLabel = (id: string) => sch?.customFields?.find((f: any) => f.id === id)?.name ?? id
+    const money = (n: number) => `₱${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    const receiptRow = (label: string, value: React.ReactNode) => (
+      <div className="flex justify-between gap-4 py-1.5 border-b border-[rgb(var(--border-soft))] last:border-0">
+        <span className="text-[11px] font-bold text-[rgb(var(--muted-fg))] uppercase tracking-wide shrink-0">{label}</span>
+        <span className="text-sm text-[rgb(var(--fg))] text-right break-words">{value}</span>
+      </div>
+    )
     return (
-      <div className="max-w-md mx-auto px-4 py-16 text-center">
-        <div className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${result.waitlisted ? 'bg-amber-500/10 text-amber-500' : 'bg-green-500/10 text-green-500'}`}>
-          {result.waitlisted ? <AlertTriangle size={28} /> : <Check size={28} />}
+      <div className="max-w-md mx-auto px-4 py-12">
+        <div className="text-center mb-6">
+          <div className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${result.waitlisted ? 'bg-amber-500/10 text-amber-500' : 'bg-green-500/10 text-green-500'}`}>
+            {result.waitlisted ? <AlertTriangle size={28} /> : <Check size={28} />}
+          </div>
+          <h2 className="text-xl font-bold mb-2">{result.waitlisted ? "You're on the waitlist" : 'Registration received!'}</h2>
+          <p className="text-sm text-[rgb(var(--muted-fg))]">
+            {result.waitlisted
+              ? "This schedule is at capacity, so you've been placed on the waitlist. We'll reach out if a spot opens up."
+              : "We've got your submission. An admin will review and confirm it shortly."}
+          </p>
         </div>
-        <h2 className="text-xl font-bold mb-2">{result.waitlisted ? "You're on the waitlist" : 'Registration received!'}</h2>
-        <p className="text-sm text-[rgb(var(--muted-fg))]">
-          {result.waitlisted
-            ? "This schedule is at capacity, so you've been placed on the waitlist. We'll reach out if a spot opens up."
-            : "We've got your submission. An admin will review and confirm it shortly."}
-        </p>
+
+        {/* Receipt — a record of exactly what was logged */}
+        {reg && (
+          <div id="reg-receipt" className="rounded-2xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface))] p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold flex items-center gap-1.5"><Check size={14} className="text-green-500" /> Registration Receipt</h3>
+              {reg.id && <span className="text-[11px] font-mono text-[rgb(var(--muted-fg))]">#{reg.id}</span>}
+            </div>
+            <div className="space-y-0">
+              {sch?.name && receiptRow('Schedule', sch.name)}
+              {sch?.date && receiptRow('Date', sch.date + (sch.startTime ? ` · ${sch.startTime}` : ''))}
+              {sch?.venue && receiptRow('Venue', sch.venue)}
+              {receiptRow('Type', String(reg.regType).charAt(0).toUpperCase() + String(reg.regType).slice(1))}
+              {reg.regType === 'individual'
+                ? (<>{reg.name && receiptRow('Name', reg.name)}{reg.position && receiptRow('Position', reg.position)}</>)
+                : (<>{reg.teamName && receiptRow(reg.regType === 'team' ? 'Team' : 'Group', reg.teamName)}
+                    {Array.isArray(reg.roster) && reg.roster.length > 0 &&
+                      receiptRow(`Roster (${reg.roster.length})`, reg.roster.map((m: any) => `${m.name}${m.position ? ` (${m.position})` : ''}`).join(', '))}</>)}
+              {reg.contactNumber && receiptRow('Contact', reg.contactNumber)}
+              {reg.email && receiptRow('Email', reg.email)}
+              {reg.customAnswers && Object.entries(reg.customAnswers).map(([k, v]) =>
+                v !== '' && v != null ? <div key={k}>{receiptRow(fieldLabel(k), String(v === true ? 'Yes' : v === false ? 'No' : v))}</div> : null)}
+              {Array.isArray(reg.guests) && reg.guests.length > 0 &&
+                receiptRow(`Gate Guests (${reg.guests.length})`, reg.guests.map((g: any) => g.name).join(', '))}
+              {reg.amountDue > 0
+                ? receiptRow('Amount Due', <span className="font-bold">{money(reg.amountDue)}</span>)
+                : receiptRow('Fee', 'Free')}
+              {receiptRow('Status', String(reg.status).charAt(0).toUpperCase() + String(reg.status).slice(1))}
+            </div>
+            <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-3">
+              Keep this receipt as your record. Screenshot or print it — an admin will confirm your registration.
+            </p>
+            <button
+              onClick={() => window.print()}
+              className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-bold border border-[rgb(var(--border-soft))] rounded-xl py-2 hover:bg-[rgb(var(--surface-hover))] transition-colors"
+            >
+              <Printer size={13} /> Print / Save as PDF
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -397,6 +452,60 @@ function RegistrationPage() {
           )}
 
           {error && <p className="text-sm text-red-500">{error}</p>}
+
+          {/* Guests (gate access) — collapsible, collapsed by default. Non-paying. */}
+          <div className="rounded-xl border border-[rgb(var(--border-soft))] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setGuestsOpen((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-[rgb(var(--surface-hover))] transition-colors"
+            >
+              <span className="flex items-center gap-2 text-sm font-bold">
+                <UserPlus size={15} className="text-[rgb(var(--muted-fg))]" />
+                Guests for gate access
+                {guests.filter((g) => g.name.trim()).length > 0 && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[rgb(var(--accent-500))]/10 text-[rgb(var(--accent-600))]">
+                    {guests.filter((g) => g.name.trim()).length}
+                  </span>
+                )}
+              </span>
+              <ChevronDown size={16} className={`text-[rgb(var(--muted-fg))] transition-transform ${guestsOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {guestsOpen && (
+              <div className="px-4 pb-4 pt-1 border-t border-[rgb(var(--border-soft))] space-y-2">
+                <p className="text-[11px] text-[rgb(var(--muted-fg))]">
+                  Optional. Add names of guests who need venue entry — they are <span className="font-bold">not paying participants</span>, just for gate access.
+                </p>
+                {guests.map((g, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      value={g.name}
+                      onChange={(e) => {
+                        const next = [...guests]; next[i] = { name: e.target.value }; setGuests(next)
+                      }}
+                      placeholder={`Guest ${i + 1} name`}
+                      className="flex-1 text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setGuests(guests.filter((_, idx) => idx !== i))}
+                      className="text-red-500 hover:bg-red-500/10 rounded p-1.5"
+                      aria-label="Remove guest"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setGuests([...guests, { name: '' }])}
+                  className="flex items-center gap-1.5 text-xs font-bold text-[rgb(var(--accent-600))] hover:underline"
+                >
+                  <Plus size={13} /> Add guest
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="rounded-xl bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] px-4 py-3">
             <p className="text-[11px] leading-relaxed text-[rgb(var(--muted-fg))]">
