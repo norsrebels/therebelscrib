@@ -1961,7 +1961,7 @@ function PlayerCard({
   );
 }
 
-type LiveFilter = "all" | "ongoing" | "next";
+type LiveFilter = "all" | "ongoing" | "next" | "done";
 type LiveGameStatus = "done" | "ongoing" | "next" | "pending";
 
 type LiveGameCard = {
@@ -2363,6 +2363,7 @@ function LiveView({
                 { key: "all", label: "All Games", icon: <Globe size={12} /> },
                 { key: "ongoing", label: "Live Now", icon: <Radio size={12} className="text-red-400" /> },
                 { key: "next", label: "Up Next", icon: <ChevronRight size={12} /> },
+                { key: "done", label: "Results", icon: <Trophy size={12} className="text-amber-400" /> },
               ] as const).map((option) => (
                 <button
                   key={option.key}
@@ -2480,14 +2481,25 @@ function LiveView({
                   </div>
                 )}
                 <div className={cn("grid gap-4", group.cards.length > 1 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1")}>
-                  {group.cards.map((card) => (
+                  {group.cards.map((card) => {
+                    const aLeads = (card.scoreA ?? 0) > (card.scoreB ?? 0);
+                    const bLeads = (card.scoreB ?? 0) > (card.scoreA ?? 0);
+                    return (
                     <div key={`ongoing-${card.id}`}
-                      className="glass border-2 border-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.2)] rounded-xl p-6 text-center">
-                      <p className="text-sm font-bold tracking-tight text-blue-500 mb-1">{card.title}</p>
+                      className="glass border-2 border-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.2)] rounded-xl p-6 text-center relative">
+                      <span className="absolute top-3 left-3 inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider text-red-500">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> Live
+                      </span>
+                      {card.court && (
+                        <span className="absolute top-3 right-3 text-[10px] font-bold text-[rgb(var(--muted-fg))] bg-[rgb(var(--surface-hover))] px-2 py-0.5 rounded-full">
+                          Court {card.court}
+                        </span>
+                      )}
+                      <p className="text-sm font-bold tracking-tight text-blue-500 mb-1 mt-1">{card.title}</p>
                       <p className="text-xs text-[rgb(var(--muted-fg))] mb-4">{card.subtitle}</p>
                       <div className="flex justify-center items-center gap-4 sm:gap-6">
                         <div className="flex-1 text-right">
-                          <p className="font-bold text-base sm:text-lg line-clamp-2">{card.teamAName}</p>
+                          <p className={cn("text-base sm:text-lg line-clamp-2", aLeads ? "font-extrabold text-[rgb(var(--fg))]" : "font-bold text-[rgb(var(--muted-fg))]")}>{card.teamAName}</p>
                         </div>
                         <div className="bg-blue-500/10 px-4 py-2 rounded-xl font-semibold text-2xl sm:text-3xl text-blue-500 min-w-[90px] flex items-center justify-center gap-2">
                           <span className={cn("transition-all duration-300", flashMap[`${card.id}-A`] && "text-amber-400 scale-125")}>
@@ -2499,11 +2511,12 @@ function LiveView({
                           </span>
                         </div>
                         <div className="flex-1 text-left">
-                          <p className="font-bold text-base sm:text-lg line-clamp-2">{card.teamBName}</p>
+                          <p className={cn("text-base sm:text-lg line-clamp-2", bLeads ? "font-extrabold text-[rgb(var(--fg))]" : "font-bold text-[rgb(var(--muted-fg))]")}>{card.teamBName}</p>
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -2523,12 +2536,13 @@ function LiveView({
         );
       })()}
 
-      {/* Active games list (pending + next, no done) */}
-      {filteredActiveCards.filter((c) => c.status !== "ongoing").length === 0 && filter !== "ongoing" ? (
-        <div className="text-center py-14 rounded-xl border border-[rgb(var(--border-soft))] glass text-[rgb(var(--muted-fg))]">
-          No games to display for this filter.
-        </div>
-      ) : (
+      {/* Active games list (pending + next, no done) — hidden on the Results filter */}
+      {filter !== "done" && (
+        filteredActiveCards.filter((c) => c.status !== "ongoing").length === 0 && filter !== "ongoing" ? (
+          <div className="text-center py-14 rounded-xl border border-[rgb(var(--border-soft))] glass text-[rgb(var(--muted-fg))]">
+            No games to display for this filter.
+          </div>
+        ) : (
         <div className="space-y-5">
           {groupCardsBySlot(filteredActiveCards.filter((c) => c.status !== "ongoing")).map((group) => (
             <div key={`list-${group.key}`} className="space-y-2">
@@ -2589,35 +2603,56 @@ function LiveView({
             </div>
           ))}
         </div>
-      )}
+      ))}
 
-      {/* Completed games — collapsible */}
-      {completedCards.length > 0 && filter === "all" && (
+      {/* Completed games / Results */}
+      {completedCards.length > 0 && (filter === "all" || filter === "done") && (
         <div className="glass border border-[rgb(var(--border-soft))] rounded-xl overflow-hidden">
-          <button
-            onClick={() => setCompletedOpen((v) => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 hover:bg-[rgb(var(--surface-hover))] transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <Trophy size={14} className="text-[rgb(var(--muted-fg))]" />
-              <span className="text-sm font-semibold">Completed ({completedCards.length})</span>
+          {/* On the "Results" filter the list is always open; on "all" it's collapsible. */}
+          {filter === "all" ? (
+            <button
+              onClick={() => setCompletedOpen((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-[rgb(var(--surface-hover))] transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Trophy size={14} className="text-amber-400" />
+                <span className="text-sm font-semibold">Results ({completedCards.length})</span>
+              </div>
+              <ChevronRight size={16} className={cn("text-[rgb(var(--muted-fg))] transition-transform", completedOpen && "rotate-90")} />
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-[rgb(var(--border-soft))]">
+              <Trophy size={14} className="text-amber-400" />
+              <span className="text-sm font-semibold">Results ({applyFollowFilter(completedCards).length})</span>
             </div>
-            <ChevronRight size={16} className={cn("text-[rgb(var(--muted-fg))] transition-transform", completedOpen && "rotate-90")} />
-          </button>
-          {completedOpen && (
-            <div className="p-3 border-t border-[rgb(var(--border-soft))]">
+          )}
+          {(filter === "done" || completedOpen) && (
+            <div className={cn("p-3", filter === "all" && "border-t border-[rgb(var(--border-soft))]")}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {applyFollowFilter(completedCards).map((card) => (
-                  <div key={`done-${card.id}`} className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] text-xs">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-[rgb(var(--muted-fg))]">{card.title}</p>
-                      <p className="font-semibold truncate">{card.teamAName} vs {card.teamBName}</p>
+                {applyFollowFilter(completedCards).map((card) => {
+                  const aWon = (card.scoreA ?? 0) > (card.scoreB ?? 0);
+                  const bWon = (card.scoreB ?? 0) > (card.scoreA ?? 0);
+                  return (
+                    <div key={`done-${card.id}`} className="px-3 py-2.5 rounded-xl bg-[rgb(var(--surface))] border border-[rgb(var(--border-soft))] text-xs">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="font-bold text-[10px] uppercase tracking-wide text-[rgb(var(--muted-fg))]">{card.title}</p>
+                        <span className="text-[9px] font-bold text-green-500 flex items-center gap-1"><Check size={10} /> Final</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={cn("truncate flex items-center gap-1", aWon ? "font-extrabold text-[rgb(var(--fg))]" : "text-[rgb(var(--muted-fg))]")}>
+                          {aWon && <Trophy size={10} className="text-amber-400 shrink-0" />}{card.teamAName}
+                        </span>
+                        <span className={cn("font-mono font-bold tabular-nums shrink-0", aWon ? "text-[rgb(var(--fg))]" : "text-[rgb(var(--muted-fg))]")}>{card.scoreA}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-0.5">
+                        <span className={cn("truncate flex items-center gap-1", bWon ? "font-extrabold text-[rgb(var(--fg))]" : "text-[rgb(var(--muted-fg))]")}>
+                          {bWon && <Trophy size={10} className="text-amber-400 shrink-0" />}{card.teamBName}
+                        </span>
+                        <span className={cn("font-mono font-bold tabular-nums shrink-0", bWon ? "text-[rgb(var(--fg))]" : "text-[rgb(var(--muted-fg))]")}>{card.scoreB}</span>
+                      </div>
                     </div>
-                    <div className="font-mono font-bold text-sm tabular-nums flex-shrink-0">
-                      {card.scoreA} – {card.scoreB}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
