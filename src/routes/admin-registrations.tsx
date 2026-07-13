@@ -254,12 +254,13 @@ function AdminRegistrationsPage() {
   })
 
   const exportCSV = () => {
-    const headers = ['ID', 'Schedule', 'Type', 'Name/Team', 'Position', 'Roster', 'Contact', 'Email', 'Facebook', 'Status', 'Registered']
+    const headers = ['ID', 'Schedule', 'Type', 'Name/Team', 'Position', 'Roster', 'Gate Guests', 'Contact', 'Email', 'Facebook', 'Status', 'Registered']
     const rows = registrations.map((r) => [
       r.id, r.scheduleName ?? '', r.regType,
       r.regType === 'individual' ? (r.name ?? '') : (r.teamName ?? ''),
       r.position ?? '',
       r.roster.map((m) => `${m.name}${m.position ? ` (${m.position})` : ''}`).join(' | '),
+      (r.guests ?? []).map((g) => g.name).join(' | '),
       r.contactNumber ?? '', r.email ?? '', r.facebookUrl ?? '', r.status,
       new Date(r.createdAt).toLocaleString(),
     ])
@@ -468,6 +469,12 @@ function AdminRegistrationsPage() {
                   {r.roster.length > 0 && (
                     <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-1">
                       Roster: {r.roster.map((m) => `${m.name}${m.position ? ` (${m.position})` : ''}`).join(', ')}
+                    </p>
+                  )}
+                  {r.guests && r.guests.length > 0 && (
+                    <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-1">
+                      <span className="font-bold text-[rgb(var(--fg))]">Gate guests ({r.guests.length}):</span>{' '}
+                      {r.guests.map((g) => g.name).join(', ')}
                     </p>
                   )}
                 </div>
