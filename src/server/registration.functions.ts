@@ -57,6 +57,7 @@ export interface Registration {
   email: string | null
   facebookUrl: string | null
   customAnswers: Record<string, any>
+  guests: { name: string }[]   // gate-access guests (non-paying); just names
   status: 'pending' | 'confirmed' | 'cancelled' | 'waitlisted'
   amountDue: number
   amountPaid: number
@@ -99,6 +100,9 @@ function mapRegistration(r: any): Registration {
     email: r.email,
     facebookUrl: r.facebook_url,
     customAnswers: r.custom_answers ?? {},
+    guests: Array.isArray(r.guests)
+      ? r.guests.map((g: any) => (typeof g === 'string' ? { name: g } : { name: String(g?.name ?? '') })).filter((g: any) => g.name)
+      : [],
     status: r.status,
     amountDue: r.amount_due != null ? Number(r.amount_due) : 0,
     amountPaid: r.amount_paid != null ? Number(r.amount_paid) : 0,
@@ -221,6 +225,7 @@ export const submitRegistration = createServerFn({ method: 'POST' })
     scheduleId: number; regType: 'individual' | 'team' | 'group'
     name: string; position: string; teamName: string; roster: RosterMember[]
     contactNumber: string; email: string; facebookUrl: string; customAnswers: Record<string, any>
+    guests?: { name: string }[]
   }) => data)
   .handler(async ({ data }) => {
     // Optional identity — registration works for guests, but we tag the member if logged in.
@@ -249,22 +254,43 @@ export const submitRegistration = createServerFn({ method: 'POST' })
       const pricePerPlayer = sched.price_per_player != null ? Number(sched.price_per_player) : 0
       const amountDue = Number((pricePerPlayer * headcount).toFixed(2))
 
+      // Sanitize guests: names only, non-empty, trimmed.
+      const cleanGuests = Array.isArray(data.guests)
+        ? data.guests.map((g) => ({ name: String(g?.name ?? '').trim() })).filter((g) => g.name)
+        : []
+
       // Insert atomically: the row is only created if the schedule still exists at
       // write time (INSERT ... SELECT ... WHERE EXISTS). This does the existence
       // check and the insert in ONE statement on ONE connection, so a stale or
       // just-deleted schedule can't slip through as a raw foreign-key error —
       // instead we detect zero rows inserted and return a clean message.
-      const rows = await db.execute(sql`
-        INSERT INTO registrations
-          (schedule_id, reg_type, name, position, team_name, roster, contact_number, email, facebook_url, custom_answers, status, netlify_user_id, amount_due, amount_paid, payment_status, priced_at)
-        SELECT
-          ${data.scheduleId}, ${data.regType}, ${data.name || null}, ${data.position || null}, ${data.teamName || null},
-          ${JSON.stringify(data.roster ?? [])}::jsonb, ${data.contactNumber || null}, ${data.email || null}, ${data.facebookUrl || null},
-          ${JSON.stringify(data.customAnswers ?? {})}::jsonb, ${initialStatus}, ${identity?.userId ?? null},
-          ${amountDue}, 0, ${amountDue > 0 ? 'unpaid' : 'paid'}, now()
-        WHERE EXISTS (SELECT 1 FROM registration_schedules WHERE id = ${data.scheduleId})
-        RETURNING *
-      `)
+      // Try WITH the guests column; fall back if the column hasn't been added yet.
+      let rows
+      try {
+        rows = await db.execute(sql`
+          INSERT INTO registrations
+            (schedule_id, reg_type, name, position, team_name, roster, contact_number, email, facebook_url, custom_answers, guests, status, netlify_user_id, amount_due, amount_paid, payment_status, priced_at)
+          SELECT
+            ${data.scheduleId}, ${data.regType}, ${data.name || null}, ${data.position || null}, ${data.teamName || null},
+            ${JSON.stringify(data.roster ?? [])}::jsonb, ${data.contactNumber || null}, ${data.email || null}, ${data.facebookUrl || null},
+            ${JSON.stringify(data.customAnswers ?? {})}::jsonb, ${JSON.stringify(cleanGuests)}::jsonb, ${initialStatus}, ${identity?.userId ?? null},
+            ${amountDue}, 0, ${amountDue > 0 ? 'unpaid' : 'paid'}, now()
+          WHERE EXISTS (SELECT 1 FROM registration_schedules WHERE id = ${data.scheduleId})
+          RETURNING *
+        `)
+      } catch {
+        rows = await db.execute(sql`
+          INSERT INTO registrations
+            (schedule_id, reg_type, name, position, team_name, roster, contact_number, email, facebook_url, custom_answers, status, netlify_user_id, amount_due, amount_paid, payment_status, priced_at)
+          SELECT
+            ${data.scheduleId}, ${data.regType}, ${data.name || null}, ${data.position || null}, ${data.teamName || null},
+            ${JSON.stringify(data.roster ?? [])}::jsonb, ${data.contactNumber || null}, ${data.email || null}, ${data.facebookUrl || null},
+            ${JSON.stringify(data.customAnswers ?? {})}::jsonb, ${initialStatus}, ${identity?.userId ?? null},
+            ${amountDue}, 0, ${amountDue > 0 ? 'unpaid' : 'paid'}, now()
+          WHERE EXISTS (SELECT 1 FROM registration_schedules WHERE id = ${data.scheduleId})
+          RETURNING *
+        `)
+      }
 
       if (!rows.rows[0]) {
         throw new Error('This schedule is no longer available — it may have been removed. Please refresh the page and pick an open schedule.')
@@ -323,6 +349,22 @@ export const getRegistrations = createServerFn({ method: 'GET' })
 // ─── Admin: update a registration's payment ──────────────────────────────────
 // Sets amount_paid and derives payment_status (unpaid/partially_paid/paid) from
 // it vs amount_due, so status and figures never disagree (single source of truth).
+// ─── Update the gate-access guest list on a registration ──────────────────────
+// Guests are non-paying names for venue entry — this never touches financials.
+export const updateRegistrationGuests = createServerFn({ method: 'POST' })
+  .inputValidator((data: { registrationId: number; guests: { name: string }[] }) => data)
+  .handler(async ({ data }) => {
+    const clean = Array.isArray(data.guests)
+      ? data.guests.map((g) => ({ name: String(g?.name ?? '').trim() })).filter((g) => g.name)
+      : []
+    return withRetry(async () => {
+      await db.execute(sql`
+        UPDATE registrations SET guests = ${JSON.stringify(clean)}::jsonb WHERE id = ${data.registrationId}
+      `)
+      return { ok: true, guests: clean }
+    })
+  })
+
 export const updateRegistrationPayment = createServerFn({ method: 'POST' })
   .inputValidator((data: { id: number; amountPaid: number }) => data)
   .handler(async ({ data }) => {
