@@ -216,6 +216,7 @@ function AdminRegistrationsPage() {
         venue: s.venue ?? '', description: s.description ?? '', status: 'active',
         capacity: s.capacity, customFields: s.customFields,
         pricePerPlayer: s.pricePerPlayer,
+        teamFlatPlayers: s.teamFlatPlayers,
         linkedTournamentExternalId: s.linkedTournamentExternalId ?? null,
       },
     })
@@ -553,7 +554,7 @@ function AdminRegistrationsPage() {
               <button onClick={() => setReconcileSchedule(null)}><X size={18} /></button>
             </div>
             <p className="text-sm text-[rgb(var(--muted-fg))] mb-4">
-              {reconcileSchedule.name} — sets each registration's amount to the current price ({reconcileSchedule.pricePerPlayer?.toFixed(2) ?? '0.00'} × headcount).
+              {reconcileSchedule.name} — sets each registration's amount to the current price ({reconcileSchedule.pricePerPlayer?.toFixed(2) ?? '0.00'} × headcount). Teams bill at a flat {reconcileSchedule.teamFlatPlayers ?? 6} players; individuals at 1; groups at roster size.
             </p>
 
             {reconcilePreview === null ? (
@@ -629,6 +630,7 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
   const [status, setStatus] = useState(schedule?.status ?? 'active')
   const [capacity, setCapacity] = useState(schedule?.capacity?.toString() ?? '')
   const [pricePerPlayer, setPricePerPlayer] = useState(schedule?.pricePerPlayer?.toString() ?? '0')
+  const [teamFlatPlayers, setTeamFlatPlayers] = useState(schedule?.teamFlatPlayers?.toString() ?? '6')
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>(schedule?.customFields ?? [])
   const [allCommunities, setAllCommunities] = useState<{ id: number; name: string; colorPrimary: string; colorSecondary: string }[]>([])
   const [selectedCommunityIds, setSelectedCommunityIds] = useState<number[]>([])
@@ -665,6 +667,7 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
       venue, description,
       capacity: capacity ? parseInt(capacity, 10) : null, status, customFields,
       pricePerPlayer: pricePerPlayer ? parseFloat(pricePerPlayer) : 0,
+      teamFlatPlayers: teamFlatPlayers ? parseInt(teamFlatPlayers, 10) : 6,
       linkedTournamentExternalId: schedule?.linkedTournamentExternalId ?? null,
     }
     try {
@@ -746,6 +749,12 @@ function ScheduleEditorModal({ schedule, onClose, onSaved }: {
               <input type="number" min="0" step="0.01" value={pricePerPlayer} onChange={(e) => setPricePerPlayer(e.target.value)} placeholder="0.00"
                 className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
               <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-0.5">Applied per person (×roster size for groups). 0 = free.</p>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Team billed players (flat)</label>
+              <input type="number" min="1" step="1" value={teamFlatPlayers} onChange={(e) => setTeamFlatPlayers(e.target.value)} placeholder="6"
+                className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+              <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-0.5">A <span className="font-bold">team</span> is always billed for this many players × price, regardless of roster size (default 6). Individual = 1, group = roster size.</p>
             </div>
           </div>
           <div>
