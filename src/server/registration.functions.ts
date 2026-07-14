@@ -33,6 +33,7 @@ export interface RegistrationSchedule {
   status: 'active' | 'closed' | 'archived'
   capacity: number | null
   pricePerPlayer: number
+  teamFlatPlayers: number   // flat # of players a TEAM is billed for (default 6)
   customFields: CustomFieldDefinition[]
   linkedTournamentExternalId: string | null
   createdAt: string
@@ -79,6 +80,7 @@ function mapSchedule(r: any): RegistrationSchedule {
     status: r.status,
     capacity: r.capacity,
     pricePerPlayer: r.price_per_player != null ? Number(r.price_per_player) : 0,
+    teamFlatPlayers: r.team_flat_players != null ? Number(r.team_flat_players) : 6,
     customFields: r.custom_fields ?? [],
     linkedTournamentExternalId: r.linked_tournament_external_id,
     createdAt: r.created_at,
@@ -148,25 +150,41 @@ export const createRegistrationSchedule = createServerFn({ method: 'POST' })
     name: string; sport: string
     date: string | null; startTime: string | null; endDate: string | null; endTime: string | null
     venue: string; description: string; capacity: number | null; status?: string
-    pricePerPlayer?: number
+    pricePerPlayer?: number; teamFlatPlayers?: number
     customFields: CustomFieldDefinition[]; linkedTournamentExternalId: string | null
   }) => data)
   .handler(async ({ data }) => {
     const admin = await getAdminUser()
     if (!admin) throw new Error('Admin access required')
+    const teamFlat = data.teamFlatPlayers != null && data.teamFlatPlayers > 0 ? Math.round(data.teamFlatPlayers) : 6
     return withRetry(async () => {
-      const rows = await db.execute(sql`
-        INSERT INTO registration_schedules
-          (name, sport, date, start_time, end_date, end_time, venue, description, capacity, status, price_per_player, custom_fields, linked_tournament_external_id)
-        VALUES (
-          ${data.name}, ${data.sport || 'Volleyball'},
-          ${data.date || null}, ${data.startTime || null}, ${data.endDate || null}, ${data.endTime || null},
-          ${data.venue}, ${data.description}, ${data.capacity}, ${data.status || 'active'}, ${data.pricePerPlayer ?? 0},
-          ${JSON.stringify(data.customFields ?? [])}::jsonb, ${data.linkedTournamentExternalId}
-        )
-        RETURNING *
-      `)
-      return mapSchedule(rows.rows[0])
+      try {
+        const rows = await db.execute(sql`
+          INSERT INTO registration_schedules
+            (name, sport, date, start_time, end_date, end_time, venue, description, capacity, status, price_per_player, team_flat_players, custom_fields, linked_tournament_external_id)
+          VALUES (
+            ${data.name}, ${data.sport || 'Volleyball'},
+            ${data.date || null}, ${data.startTime || null}, ${data.endDate || null}, ${data.endTime || null},
+            ${data.venue}, ${data.description}, ${data.capacity}, ${data.status || 'active'}, ${data.pricePerPlayer ?? 0}, ${teamFlat},
+            ${JSON.stringify(data.customFields ?? [])}::jsonb, ${data.linkedTournamentExternalId}
+          )
+          RETURNING *
+        `)
+        return mapSchedule(rows.rows[0])
+      } catch {
+        const rows = await db.execute(sql`
+          INSERT INTO registration_schedules
+            (name, sport, date, start_time, end_date, end_time, venue, description, capacity, status, price_per_player, custom_fields, linked_tournament_external_id)
+          VALUES (
+            ${data.name}, ${data.sport || 'Volleyball'},
+            ${data.date || null}, ${data.startTime || null}, ${data.endDate || null}, ${data.endTime || null},
+            ${data.venue}, ${data.description}, ${data.capacity}, ${data.status || 'active'}, ${data.pricePerPlayer ?? 0},
+            ${JSON.stringify(data.customFields ?? [])}::jsonb, ${data.linkedTournamentExternalId}
+          )
+          RETURNING *
+        `)
+        return mapSchedule(rows.rows[0])
+      }
     })
   })
 
@@ -176,26 +194,43 @@ export const updateRegistrationSchedule = createServerFn({ method: 'POST' })
     id: number; name: string; sport: string
     date: string | null; startTime: string | null; endDate: string | null; endTime: string | null
     venue: string; description: string; status: string; capacity: number | null
-    pricePerPlayer?: number
+    pricePerPlayer?: number; teamFlatPlayers?: number
     customFields: CustomFieldDefinition[]; linkedTournamentExternalId: string | null
   }) => data)
   .handler(async ({ data }) => {
     const admin = await getAdminUser()
     if (!admin) throw new Error('Admin access required')
     return withRetry(async () => {
-      const rows = await db.execute(sql`
-        UPDATE registration_schedules SET
-          name = ${data.name}, sport = ${data.sport},
-          date = ${data.date || null}, start_time = ${data.startTime || null},
-          end_date = ${data.endDate || null}, end_time = ${data.endTime || null},
-          venue = ${data.venue}, description = ${data.description}, status = ${data.status},
-          capacity = ${data.capacity}, price_per_player = COALESCE(${data.pricePerPlayer ?? null}, price_per_player),
-          custom_fields = ${JSON.stringify(data.customFields ?? [])}::jsonb,
-          linked_tournament_external_id = ${data.linkedTournamentExternalId}, updated_at = now()
-        WHERE id = ${data.id}
-        RETURNING *
-      `)
-      return mapSchedule(rows.rows[0])
+      try {
+        const rows = await db.execute(sql`
+          UPDATE registration_schedules SET
+            name = ${data.name}, sport = ${data.sport},
+            date = ${data.date || null}, start_time = ${data.startTime || null},
+            end_date = ${data.endDate || null}, end_time = ${data.endTime || null},
+            venue = ${data.venue}, description = ${data.description}, status = ${data.status},
+            capacity = ${data.capacity}, price_per_player = COALESCE(${data.pricePerPlayer ?? null}, price_per_player),
+            team_flat_players = COALESCE(${data.teamFlatPlayers ?? null}, team_flat_players),
+            custom_fields = ${JSON.stringify(data.customFields ?? [])}::jsonb,
+            linked_tournament_external_id = ${data.linkedTournamentExternalId}, updated_at = now()
+          WHERE id = ${data.id}
+          RETURNING *
+        `)
+        return mapSchedule(rows.rows[0])
+      } catch {
+        const rows = await db.execute(sql`
+          UPDATE registration_schedules SET
+            name = ${data.name}, sport = ${data.sport},
+            date = ${data.date || null}, start_time = ${data.startTime || null},
+            end_date = ${data.endDate || null}, end_time = ${data.endTime || null},
+            venue = ${data.venue}, description = ${data.description}, status = ${data.status},
+            capacity = ${data.capacity}, price_per_player = COALESCE(${data.pricePerPlayer ?? null}, price_per_player),
+            custom_fields = ${JSON.stringify(data.customFields ?? [])}::jsonb,
+            linked_tournament_external_id = ${data.linkedTournamentExternalId}, updated_at = now()
+          WHERE id = ${data.id}
+          RETURNING *
+        `)
+        return mapSchedule(rows.rows[0])
+      }
     })
   })
 
@@ -249,8 +284,15 @@ export const submitRegistration = createServerFn({ method: 'POST' })
 
       // Capture the price AT SIGNUP so financial reports reflect what was actually
       // charged, not the schedule's current price (which may change later).
-      // Pricing is per-player: headcount = 1 for individual, else roster length.
-      const headcount = data.regType === 'individual' ? 1 : Math.max((data.roster ?? []).length, 1)
+      // Pricing headcount: individual = 1; TEAM = a flat player count (default 6),
+      // regardless of roster size; group = actual roster size. The team flat count
+      // is configurable per schedule (team_flat_players), so it's easy to change.
+      const teamFlat = sched.team_flat_players != null ? Number(sched.team_flat_players) : 6
+      const headcount = data.regType === 'individual'
+        ? 1
+        : data.regType === 'team'
+          ? Math.max(teamFlat, 1)
+          : Math.max((data.roster ?? []).length, 1)
       const pricePerPlayer = sched.price_per_player != null ? Number(sched.price_per_player) : 0
       const amountDue = Number((pricePerPlayer * headcount).toFixed(2))
 
@@ -528,7 +570,10 @@ export const getPaymentSummary = createServerFn({ method: 'POST' })
 // Payment status is only changed to keep it consistent with the new amount — it
 // never marks an unpaid registration as paid.
 
-const HEADCOUNT_SQL = sql`(CASE WHEN r.reg_type = 'individual' THEN 1 ELSE GREATEST(jsonb_array_length(r.roster), 1) END)`
+// Pricing headcount used by reconcile: individual = 1; team = the schedule's flat
+// player count (team_flat_players, default 6); group = roster size. Mirrors the
+// logic in submitRegistration so new signups and reconcile always agree.
+const HEADCOUNT_SQL = sql`(CASE WHEN r.reg_type = 'individual' THEN 1 WHEN r.reg_type = 'team' THEN GREATEST(COALESCE(s.team_flat_players, 6), 1) ELSE GREATEST(jsonb_array_length(r.roster), 1) END)`
 
 export const previewReconcileSchedule = createServerFn({ method: 'POST' })
   .inputValidator((data: { scheduleId: number }) => data)
