@@ -169,7 +169,7 @@ function PlayerAutocomplete({
         />
         <button
           onClick={handleManualAdd}
-          className="bg-blue-600 text-white hover:bg-blue-700 shadow-sm rounded-full font-bold text-xs px-3 py-2 rounded-xl"
+          className="tr-grad hover:opacity-95 shadow-sm font-bold text-xs px-3 py-2 rounded-xl"
         >
           Add
         </button>
@@ -515,7 +515,7 @@ function TeamsTab({
           </select>
           <button
             onClick={addTeam}
-            className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 shadow-sm rounded-full font-bold text-sm tracking-normal px-5 py-2.5 rounded-full"
+            className="flex items-center gap-2 tr-grad hover:opacity-95 shadow-sm rounded-full font-bold text-sm tracking-normal px-5 py-2.5"
           >
             <Plus size={16} /> ADD
           </button>
@@ -631,7 +631,7 @@ function TeamsTab({
                     setState({ ...state, teams: state.teams.map(t => t.id === csvTargetTeam ? updatedTeam : t) })
                     setCsvPreview(null)
                   }}
-                  className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-500 rounded-xl text-xs font-bold"
+                  className="px-4 py-2 tr-grad hover:opacity-95 rounded-xl text-xs font-bold"
                 >
                   Import {csvPreview.length} Players
                 </button>
@@ -696,7 +696,7 @@ function TeamsTab({
               setState({ ...state, poolMatches: arranged, playoffGames: [] });
               showToast("Schedule generated successfully", "success");
             }}
-            className="flex items-center gap-2 border border-[rgb(var(--fg))] text-[rgb(var(--fg))] font-bold text-sm tracking-normal px-6 py-3 rounded-xl hover:bg-[rgb(var(--fg))] hover:text-[rgb(var(--bg))]"
+            className="flex items-center gap-2 tr-grad hover:opacity-95 font-bold text-sm tracking-normal px-6 py-3 rounded-xl shadow-sm"
           >
             <Calendar size={16} /> GENERATE SCHEDULE
           </button>
@@ -1026,6 +1026,159 @@ function BracketVisual({ resolvedPlayoffs, teams, maxScore, leadScore }: {
   );
 }
 
+function PlayoffCockpit({
+  game, teams, settings, serve, setServe, onClose,
+  updateScore, updateSetScore, updateIsFinal,
+}: {
+  game: any;
+  teams: Team[];
+  settings: any;
+  serve: "A" | "B" | null;
+  setServe: (s: "A" | "B" | null) => void;
+  onClose: () => void;
+  updateScore: (slot: string, field: "scoreA" | "scoreB", val: string) => void;
+  updateSetScore: (slot: string, setIdx: number, field: "scoreA" | "scoreB", val: string) => void;
+  updateIsFinal: (slot: string, val: boolean) => void;
+}) {
+  const need = setsToWin(game.phase as PlayoffPhase, settings); // 1 (Bo1) or 2 (Bo3)
+  const isBo3 = need === 2;
+  const target = settings.maxScore ?? null;
+  const lead = settings.leadScore ?? null;
+
+  const tA = teams.find((t) => t.id === game.teamAId);
+  const tB = teams.find((t) => t.id === game.teamBId);
+  const nameA = tA?.name ?? game.teamALabel ?? "Team A";
+  const nameB = tB?.name ?? game.teamBLabel ?? "Team B";
+
+  const sets: { scoreA: number; scoreB: number }[] = game.sets ?? [];
+  const setWinsA = sets.filter((s) => s.scoreA > s.scoreB).length;
+  const setWinsB = sets.filter((s) => s.scoreB > s.scoreA).length;
+
+  // Current-set index + live scores. Bo1 uses the single scoreA/scoreB.
+  const curIdx = isBo3 ? Math.min(sets.length === 0 || decided(sets[sets.length - 1]) ? sets.length : sets.length - 1, 4) : 0;
+  const cur = isBo3 ? (sets[curIdx] ?? { scoreA: 0, scoreB: 0 }) : { scoreA: game.scoreA ?? 0, scoreB: game.scoreB ?? 0 };
+
+  function decided(s?: { scoreA: number; scoreB: number }) {
+    if (!s || target == null) return false;
+    const l = lead && lead > 0 ? lead : 1;
+    const m = s.scoreA >= target || s.scoreB >= target;
+    return m && Math.abs(s.scoreA - s.scoreB) >= l;
+  }
+  const setIsFinal = decided(cur);
+  const setWinner = setIsFinal ? (cur.scoreA > cur.scoreB ? "A" : "B") : null;
+  const nearPoint = (() => {
+    if (target == null) return null;
+    const l = lead && lead > 0 ? lead : 1;
+    if (cur.scoreA >= target - 1 && cur.scoreA - cur.scoreB >= l - 1 && cur.scoreA >= cur.scoreB) return "A";
+    if (cur.scoreB >= target - 1 && cur.scoreB - cur.scoreA >= l - 1 && cur.scoreB >= cur.scoreA) return "B";
+    return null;
+  })();
+  const matchDone = setWinsA >= need || setWinsB >= need;
+
+  const writeScore = (side: "A" | "B", val: number) => {
+    const v = Math.max(0, val);
+    if (isBo3) updateSetScore(game.slot, curIdx, side === "A" ? "scoreA" : "scoreB", String(v));
+    else updateScore(game.slot, side === "A" ? "scoreA" : "scoreB", String(v));
+  };
+  const bump = (side: "A" | "B", d: number) => writeScore(side, (side === "A" ? cur.scoreA : cur.scoreB) + d);
+  const typeScore = (side: "A" | "B") => {
+    const curV = side === "A" ? cur.scoreA : cur.scoreB;
+    const v = window.prompt(`Set ${side === "A" ? nameA : nameB} score to:`, String(curV));
+    if (v === null) return;
+    const n = parseInt(v, 10);
+    if (isNaN(n) || n < 0) return;
+    writeScore(side, n);
+  };
+
+  const TeamRow = ({ side, name, score, color }: { side: "A" | "B"; name: string; score: number; color: string }) => (
+    <div className="border border-[rgb(var(--border-soft))] rounded-xl p-3 mb-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-1.5 h-9 rounded" style={{ background: color }} />
+          <div className="min-w-0">
+            <p className="text-sm font-bold truncate">{name}</p>
+            <button
+              onClick={() => setServe(serve === side ? null : side)}
+              className={cn(
+                "mt-1 text-[9px] font-bold px-2 py-0.5 rounded-full border",
+                serve === side
+                  ? "bg-amber-400/15 text-amber-500 border-amber-500/40"
+                  : "text-[rgb(var(--muted-fg))] border-[rgb(var(--border-soft))]",
+              )}
+            >
+              {serve === side ? "● serving" : "tap: serve"}
+            </button>
+          </div>
+        </div>
+        <button onClick={() => typeScore(side)} title="Tap to type exact score"
+          className="text-4xl font-bold tabular-nums leading-none">{score}</button>
+      </div>
+      <div className="flex gap-2 mt-2">
+        <button onClick={() => bump(side, -1)} aria-label={`${name} minus`}
+          className="w-12 h-11 rounded-xl border border-[rgb(var(--border-soft))] text-2xl text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--surface-hover))]">−</button>
+        <button onClick={() => bump(side, 1)}
+          className="flex-1 h-11 rounded-xl tr-grad hover:opacity-95 text-sm font-bold">+ point</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-3 py-4" onClick={onClose}>
+      <div className="glass border border-[rgb(var(--border-soft))] rounded-2xl p-4 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[11px] font-bold text-emerald-500 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            {matchDone ? "Final" : "Live"} · {PHASE_LABELS[game.phase as PlayoffPhase] || game.label}
+          </span>
+          <button onClick={onClose} className="text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] p-1"><X size={16} /></button>
+        </div>
+
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[10px] font-bold text-[rgb(var(--muted-fg))] bg-[rgb(var(--surface-hover))] px-2 py-0.5 rounded-full">
+            {isBo3 ? `Sets ${setWinsA}–${setWinsB}` : "Single set"}
+          </span>
+          <span className="text-[11px] text-[rgb(var(--muted-fg))]">
+            {isBo3 ? `Set ${curIdx + 1} · best of 3` : "Bo1"}{target ? ` · to ${target}` : ""}
+          </span>
+        </div>
+
+        <TeamRow side="A" name={nameA} score={cur.scoreA} color="#3b82f6" />
+        <TeamRow side="B" name={nameB} score={cur.scoreB} color="#f43f5e" />
+
+        <div className="text-center text-[11px] font-bold min-h-[16px] mb-2">
+          {matchDone ? (
+            <span className="text-emerald-500">Match complete — {setWinsA > setWinsB ? nameA : nameB} win</span>
+          ) : setWinner ? (
+            <span className="text-emerald-500">{setWinner === "A" ? nameA : nameB} win the set</span>
+          ) : nearPoint ? (
+            <span className="text-amber-500">Set point · {nearPoint === "A" ? nameA : nameB}</span>
+          ) : (
+            <span className="text-[rgb(var(--muted-fg))]">Serve is a manual aid — tap a chip to set it</span>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 h-10 rounded-xl border border-[rgb(var(--border-soft))] text-xs font-bold">Done</button>
+          {!isBo3 && (
+            <button
+              onClick={() => { updateIsFinal(game.slot, true); onClose(); }}
+              disabled={!setIsFinal}
+              className="flex-1 h-10 rounded-xl tr-grad hover:opacity-95 text-xs font-bold disabled:opacity-40"
+            >
+              Lock final
+            </button>
+          )}
+        </div>
+        {isBo3 && (
+          <p className="text-[10px] text-[rgb(var(--muted-fg))] text-center mt-2">
+            Each set is scored here; the series resolves automatically at 2 sets.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MatchesTab({
   state,
   setState,
@@ -1041,6 +1194,10 @@ function MatchesTab({
   const [showRemoveDEModal, setShowRemoveDEModal] = useState(false);
   const [matchSearch, setMatchSearch] = useState("");
   const [matchFilter, setMatchFilter] = useState<"all" | "A" | "B" | "live" | "done" | "todo">("all");
+  // Playoff cockpit: which playoff slot is open in focused-scoring mode, and the
+  // manual serve indicator (live on-screen aid only — never persisted).
+  const [cockpitSlot, setCockpitSlot] = useState<string | null>(null);
+  const [cockpitServe, setCockpitServe] = useState<"A" | "B" | null>(null);
 
   const updateMatch = (id: string, updates: Partial<PoolMatch>) => {
     setState({
@@ -1268,6 +1425,24 @@ function MatchesTab({
         onCancel={() => setShowRemoveDEModal(false)}
       />
 
+      {cockpitSlot && (() => {
+        const g = resolvedPlayoffs.find((x) => x.slot === cockpitSlot);
+        if (!g) return null;
+        return (
+          <PlayoffCockpit
+            game={g}
+            teams={state.teams}
+            settings={state.settings}
+            serve={cockpitServe}
+            setServe={setCockpitServe}
+            onClose={() => setCockpitSlot(null)}
+            updateScore={updateScore}
+            updateSetScore={updateSetScore}
+            updateIsFinal={updateIsFinal}
+          />
+        );
+      })()}
+
       {state.poolMatches.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between mb-2 border-b border-[rgb(var(--border-soft))] pb-2">
@@ -1441,13 +1616,13 @@ function MatchesTab({
                 <div
                   key={g.slot}
                   className={cn(
-                    "glass border rounded-xl p-4",
+                    "glass border rounded-xl p-4 relative overflow-hidden",
                     g.phase === "championship"
-                      ? "border-[rgb(var(--fg)/0.3)]"
+                      ? "border-[rgb(var(--grad-from)/0.4)] tr-grad-ring"
                       : "border-[rgb(var(--border))]",
                   )}
                 >
-                  <div className="flex items-center justify-between mb-3">
+                  {g.phase === "championship" && <span className="absolute inset-x-0 top-0 h-1 tr-grad" />}                  <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => updateIsFinal(g.slot, !g.isFinal)}
@@ -1489,6 +1664,15 @@ function MatchesTab({
                         <span className="text-[9px] font-bold text-[rgb(var(--muted-fg))] flex items-center gap-1">
                           <Clock size={10} /> Waiting for teams
                         </span>
+                      )}
+                      {g.teamAId && g.teamBId && !g.isFinal && (
+                        <button
+                          onClick={() => { setCockpitSlot(g.slot); setCockpitServe(null); }}
+                          className="tr-grad hover:opacity-95 text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-sm"
+                          title="Open focused scoring"
+                        >
+                          <Radio size={11} /> Score
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1708,7 +1892,9 @@ function LeaderboardTab({ state }: { state: TournamentState }) {
     }
     return (
       <div className="mb-8">
-        <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))] mb-4">{poolLabel}</h3>
+        <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))] mb-4 flex items-center gap-2">
+          <span className="w-1 h-4 rounded tr-grad inline-block" />{poolLabel}
+        </h3>
         <div className="overflow-x-auto glass rounded-xl border border-[rgb(var(--border-soft))] shadow-sm">
           <table className="w-full text-sm">
             <thead>
@@ -1726,14 +1912,17 @@ function LeaderboardTab({ state }: { state: TournamentState }) {
                   const diff = s.pointsFor - s.pointsAgainst;
                   const h2hResults = h2hMap[s.team.id] ?? {};
                   return (
-                    <tr key={s.team.id} className="border-b border-[rgb(var(--border-soft))] last:border-0 hover:bg-[rgb(var(--bg))]">
+                    <tr key={s.team.id} className={cn(
+                      "border-b border-[rgb(var(--border-soft))] last:border-0 hover:bg-[rgb(var(--bg))]",
+                      s.rank <= 2 && "bg-[rgb(var(--grad-from)/0.05)]",
+                    )}>
                       <td className="py-3 px-4">
                         {s.rank <= 2 ? (
                           <span
                             className={cn(
                               "inline-flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-extrabold",
                               s.rank === 1
-                                ? "bg-amber-500/20 text-amber-500 border border-amber-500/40"
+                                ? "tr-grad text-white shadow-sm"
                                 : "bg-[rgb(var(--surface-hover))] text-[rgb(var(--fg))] border border-[rgb(var(--border-strong))]",
                             )}
                             title={s.rank <= 2 ? "Advances (top 2)" : undefined}
@@ -2321,21 +2510,22 @@ function LiveView({
   return (
     <div className="space-y-6">
       {/* Header card */}
-      <div className="glass border border-[rgb(var(--border-soft))] shadow-sm rounded-xl p-4 sm:p-5">
+      <div className="relative overflow-hidden glass border border-[rgb(var(--border-soft))] shadow-sm rounded-2xl p-4 sm:p-5">
+        <div className="absolute inset-x-0 top-0 h-1 tr-grad" />
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex-1 min-w-0">
-            <h2 className="text-sm font-semibold tracking-tight">Live Match Center</h2>
-            <p className="text-xs text-[rgb(var(--muted-fg))] mt-1">Public scoreboard and next-game callouts</p>
+            <h2 className="text-lg font-black tracking-tight tr-grad-text inline-block">Live Match Center</h2>
+            <p className="text-xs text-[rgb(var(--muted-fg))] mt-0.5">Public scoreboard and next-game callouts</p>
             {/* Tournament progress bar */}
             {totalMatches > 0 && (
               <div className="mt-3">
                 <div className="flex items-center justify-between text-[11px] text-[rgb(var(--muted-fg))] mb-1">
                   <span>{playedMatches} of {totalMatches} matches played</span>
-                  <span>{Math.round((playedMatches / totalMatches) * 100)}%</span>
+                  <span className="font-bold tr-grad-text">{Math.round((playedMatches / totalMatches) * 100)}%</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-[rgb(var(--surface-hover))] overflow-hidden">
                   <div
-                    className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                    className="h-full tr-grad rounded-full transition-all duration-500"
                     style={{ width: `${(playedMatches / totalMatches) * 100}%` }}
                   />
                 </div>
@@ -2371,7 +2561,7 @@ function LiveView({
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold tracking-normal border transition-colors",
                     filter === option.key
-                      ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                      ? "tr-grad border-transparent shadow-sm"
                       : "border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))]",
                   )}
                 >
@@ -2389,7 +2579,7 @@ function LiveView({
             {followTeam && (
               <button
                 onClick={() => setFollowTeam(null)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-600 text-white flex-shrink-0"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold tr-grad flex-shrink-0"
               >
                 {followTeam} <X size={10} />
               </button>
@@ -2418,7 +2608,7 @@ function LiveView({
             <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80 mb-1">
               Tournament Complete
             </p>
-            <h2 className="text-2xl font-bold text-[rgb(var(--fg))]">{championInfo.champion}</h2>
+            <h2 className="text-2xl font-black tr-grad-text inline-block">{championInfo.champion}</h2>
             <p className="text-sm text-[rgb(var(--muted-fg))] mt-1">Champion 🏆</p>
             {championInfo.runnerUp && (
               <p className="text-xs text-[rgb(var(--muted-fg))] mt-3">
@@ -2486,7 +2676,8 @@ function LiveView({
                     const bLeads = (card.scoreB ?? 0) > (card.scoreA ?? 0);
                     return (
                     <div key={`ongoing-${card.id}`}
-                      className="glass border-2 border-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.2)] rounded-xl p-6 text-center relative">
+                      className="relative glass border border-[rgb(var(--border-soft))] tr-grad-ring shadow-[0_0_24px_rgb(var(--grad-from)/0.18)] rounded-2xl p-6 text-center overflow-hidden">
+                      <span className="absolute inset-x-0 top-0 h-1 tr-grad" />
                       <span className="absolute top-3 left-3 inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider text-red-500">
                         <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> Live
                       </span>
@@ -2495,23 +2686,25 @@ function LiveView({
                           Court {card.court}
                         </span>
                       )}
-                      <p className="text-sm font-bold tracking-tight text-blue-500 mb-1 mt-1">{card.title}</p>
+                      <p className="text-sm font-bold tracking-tight tr-grad-text inline-block mb-1 mt-1">{card.title}</p>
                       <p className="text-xs text-[rgb(var(--muted-fg))] mb-4">{card.subtitle}</p>
-                      <div className="flex justify-center items-center gap-4 sm:gap-6">
-                        <div className="flex-1 text-right">
-                          <p className={cn("text-base sm:text-lg line-clamp-2", aLeads ? "font-extrabold text-[rgb(var(--fg))]" : "font-bold text-[rgb(var(--muted-fg))]")}>{card.teamAName}</p>
+                      <div className="flex justify-center items-center gap-3 sm:gap-5">
+                        <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
+                          <p className={cn("text-base sm:text-lg line-clamp-2 text-right", aLeads ? "font-extrabold text-[rgb(var(--fg))]" : "font-bold text-[rgb(var(--muted-fg))]")}>{card.teamAName}</p>
+                          <span className="w-1 h-8 rounded shrink-0" style={{ background: "#3b82f6" }} />
                         </div>
-                        <div className="bg-blue-500/10 px-4 py-2 rounded-xl font-semibold text-2xl sm:text-3xl text-blue-500 min-w-[90px] flex items-center justify-center gap-2">
-                          <span className={cn("transition-all duration-300", flashMap[`${card.id}-A`] && "text-amber-400 scale-125")}>
+                        <div className="tr-grad px-4 py-2 rounded-xl font-semibold text-2xl sm:text-3xl text-white min-w-[92px] flex items-center justify-center gap-2 shadow-sm">
+                          <span className={cn("transition-all duration-300", flashMap[`${card.id}-A`] && "text-amber-300 scale-125")}>
                             {card.scoreA ?? 0}
                           </span>
-                          <span className="text-lg text-[rgb(var(--muted-fg))]">-</span>
-                          <span className={cn("transition-all duration-300", flashMap[`${card.id}-B`] && "text-amber-400 scale-125")}>
+                          <span className="text-lg text-white/60">-</span>
+                          <span className={cn("transition-all duration-300", flashMap[`${card.id}-B`] && "text-amber-300 scale-125")}>
                             {card.scoreB ?? 0}
                           </span>
                         </div>
-                        <div className="flex-1 text-left">
-                          <p className={cn("text-base sm:text-lg line-clamp-2", bLeads ? "font-extrabold text-[rgb(var(--fg))]" : "font-bold text-[rgb(var(--muted-fg))]")}>{card.teamBName}</p>
+                        <div className="flex-1 flex items-center justify-start gap-2 min-w-0">
+                          <span className="w-1 h-8 rounded shrink-0" style={{ background: "#f43f5e" }} />
+                          <p className={cn("text-base sm:text-lg line-clamp-2 text-left", bLeads ? "font-extrabold text-[rgb(var(--fg))]" : "font-bold text-[rgb(var(--muted-fg))]")}>{card.teamBName}</p>
                         </div>
                       </div>
                     </div>
@@ -2694,7 +2887,7 @@ function SettingsTab({
           </h3>
           <button
             onClick={handleSave}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
+            className="px-4 py-2 tr-grad hover:opacity-95 text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
           >
             {isSaved ? (
               <>
@@ -2824,8 +3017,8 @@ function SettingsTab({
 
         {/* Bracket & Playoff Variant — pick the format once, here (unify) */}
         <div className="pt-4 border-t border-[rgb(var(--border-soft))] mt-4">
-          <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))] mb-1">
-            Bracket &amp; Playoff Variant
+          <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))] mb-1 flex items-center gap-2">
+            <span className="w-1 h-3.5 rounded tr-grad inline-block" />Bracket &amp; Playoff Variant
           </h3>
           <p className="text-[10px] text-[rgb(var(--muted-fg))] mb-3">
             How the playoffs are structured. Changing this rebuilds the bracket.
@@ -2854,7 +3047,7 @@ function SettingsTab({
                   className={cn(
                     'p-3 text-left rounded-lg border-2 text-xs transition-all',
                     active
-                      ? 'border-[rgb(var(--accent-500))] bg-[rgb(var(--accent-500))]/10 text-[rgb(var(--fg))] font-bold'
+                      ? 'border-[rgb(var(--grad-from)/0.5)] bg-[rgb(var(--grad-from)/0.08)] text-[rgb(var(--fg))] font-bold tr-grad-ring'
                       : 'border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] text-[rgb(var(--muted-fg))] hover:bg-[rgb(var(--surface-hover))]',
                   )}
                 >
@@ -2868,8 +3061,8 @@ function SettingsTab({
 
         {/* Playoff Series Format — per-phase Bo1/Bo3, configured once */}
         <div className="pt-4 border-t border-[rgb(var(--border-soft))] mt-4">
-          <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))] mb-1">
-            Playoff Series Format
+          <h3 className="text-xs font-bold tracking-tight text-[rgb(var(--fg))] mb-1 flex items-center gap-2">
+            <span className="w-1 h-3.5 rounded tr-grad inline-block" />Playoff Series Format
           </h3>
           <p className="text-[10px] text-[rgb(var(--muted-fg))] mb-3">
             Choose which playoff phases are a single game or a best-of-3 series.
@@ -2983,7 +3176,7 @@ function SettingsTab({
           </button>
           <button
             onClick={() => setShowCardGenerator(true)}
-            className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-sm font-bold transition-colors"
+            className="w-full flex items-center justify-center gap-3 tr-grad hover:opacity-95 rounded-xl py-3 text-sm font-bold transition-colors"
           >
             <ImageIcon size={16} /> Generate Schedule Card (JPG)
           </button>
@@ -3186,7 +3379,7 @@ export default function TournamentApp({
               alt="Rebels Volleyball logo"
               className="h-8 w-8 rounded-xl object-cover border border-[rgb(var(--border-soft))]"
             />
-            <span>{state.settings.scheduleName || "Unnamed Event"}</span>
+            <span className="tr-grad-text font-black">{state.settings.scheduleName || "Unnamed Event"}</span>
           </div>
           {state.settings.venue && (
             <span className="flex items-center gap-1 text-[rgb(var(--muted-fg))]">
@@ -3286,7 +3479,7 @@ export default function TournamentApp({
                     className={cn(
                       "flex items-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold tracking-normal whitespace-nowrap transition-colors",
                       active
-                        ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
+                        ? "tr-grad hover:opacity-95 shadow-sm"
                         : "text-[rgb(var(--muted-fg))] hover:text-[rgb(var(--fg))] hover:bg-[rgb(var(--surface-hover))]",
                     )}
                   >
