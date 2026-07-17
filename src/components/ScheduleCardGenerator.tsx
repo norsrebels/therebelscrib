@@ -21,6 +21,14 @@ type Alignment = 'left' | 'center' | 'right'
 type BackgroundStyle = 'solid' | 'gradient' | 'pattern'
 type Dimension = 'portrait' | 'square' | 'banner' | 'story'
 type TitleSize = 'small' | 'normal' | 'big' | 'huge'
+// Line spacing (leading) and block spacing (gaps between sections), user-controlled.
+type Spacing = 'tight' | 'normal' | 'relaxed'
+const LINE_SCALE: Record<Spacing, number> = { tight: 0.88, normal: 1, relaxed: 1.18 }
+const BLOCK_SCALE: Record<Spacing, number> = { tight: 0.6, normal: 1, relaxed: 1.5 }
+// How the text stack sits in the available area:
+//  center = one centred block (previous behaviour)
+//  spread = free space distributed BETWEEN blocks so the card breathes edge-to-edge
+type VerticalMode = 'center' | 'spread'
 type LogoH = 'left' | 'center' | 'right'
 type LogoV = 'top' | 'bottom'
 
@@ -61,6 +69,9 @@ interface CardStyle {
   sectionOrder: SectionKey[]
   hiddenSections: SectionKey[]
   twoColumn: boolean
+  lineSpacing: Spacing
+  blockSpacing: Spacing
+  verticalMode: VerticalMode
 }
 
 // Reorderable/hideable content sections (Phase 2). The renderer walks sectionOrder,
@@ -326,23 +337,88 @@ function measureStack(ctx: CanvasRenderingContext2D, items: StackItem[]): { tota
   return { total, lines }
 }
 
-// Renders a measured stack, vertically centered within [top, top+areaH], at anchorX.
+/** Apply the user's line-spacing (leading) and block-spacing (gaps) preferences. */
+function applySpacing(items: StackItem[], lineK: number, blockK: number): StackItem[] {
+  return items.map((it) => {
+    if (it.kind === 'gap') return { ...it, height: it.height * blockK }
+    if (it.kind === 'rule') return { ...it, gapAfter: it.gapAfter * blockK }
+    return { ...it, lineHeight: it.lineHeight * lineK, gapAfter: it.gapAfter * blockK }
+  })
+}
+
+/** Multiply the px size inside a canvas font shorthand (e.g. "700 96px X" -> "700 72px X"). */
+function scaleFontPx(font: string, k: number): string {
+  return font.replace(/(\d+(?:\.\d+)?)px/, (_m, n) => `${Math.max(1, parseFloat(n) * k)}px`)
+}
+
+/** Scale only the gaps of a stack (the most compressible space). */
+function scaleGaps(items: StackItem[], k: number): StackItem[] {
+  return items.map((it) => {
+    if (it.kind === 'gap') return { ...it, height: it.height * k }
+    return { ...it, gapAfter: it.gapAfter * k }
+  })
+}
+
+/** Scale type size + leading together (used only when gap-compression isn't enough). */
+function scaleType(items: StackItem[], k: number): StackItem[] {
+  return items.map((it) => {
+    if (it.kind === 'gap') return { ...it, height: it.height * k }
+    if (it.kind === 'rule') return { ...it, height: it.height * k, gapAfter: it.gapAfter * k }
+    return { ...it, font: scaleFontPx(it.font, k), lineHeight: it.lineHeight * k, gapAfter: it.gapAfter * k }
+  })
+}
+
+// Renders a measured stack within [top, top+areaH] at anchorX.
+//  - Auto-fit: content taller than the area is compressed (gaps first, then type)
+//    so it can never silently run off the card.
+//  - mode 'spread': leftover space is distributed BETWEEN blocks instead of leaving
+//    the whole stack clumped in the middle.
 function renderStack(
   ctx: CanvasRenderingContext2D,
   items: StackItem[],
   anchorX: number, canvasAlign: CanvasTextAlign,
-  top: number, areaH: number
+  top: number, areaH: number,
+  mode: VerticalMode = 'center'
 ) {
-  const { total, lines } = measureStack(ctx, items)
-  let y = top + Math.max(0, (areaH - total) / 2)
+  let work = items
+  let { total, lines } = measureStack(ctx, work)
+
+  // ── Auto-fit when the stack overflows the available area ──
+  if (areaH > 0 && total > areaH) {
+    const gapTotal = work.reduce(
+      (s, it) => s + (it.kind === 'gap' ? it.height : it.gapAfter), 0)
+    if (gapTotal > 0) {
+      // Compress gaps, but never below 30% of their intended value.
+      const needed = total - areaH
+      const k = Math.max(0.3, 1 - needed / gapTotal)
+      work = scaleGaps(work, k)
+      const m = measureStack(ctx, work); total = m.total; lines = m.lines
+    }
+    if (total > areaH) {
+      // Still too tall — scale type + leading down uniformly to fit exactly.
+      const k = areaH / total
+      work = scaleType(work, k)
+      const m = measureStack(ctx, work); total = m.total; lines = m.lines
+    }
+  }
+
+  // ── Spread: push leftover space into the seams between blocks ──
+  let extraPerSeam = 0
+  if (mode === 'spread' && areaH > total) {
+    const seams = Math.max(1, work.length - 1)
+    extraPerSeam = (areaH - total) / seams
+  }
+
+  let y = mode === 'spread' ? top : top + Math.max(0, (areaH - total) / 2)
   ctx.textAlign = canvasAlign
-  items.forEach((it, idx) => {
-    if (it.kind === 'gap') { y += it.height; return }
+  work.forEach((it, idx) => {
+    const seam = idx < work.length - 1 ? extraPerSeam : 0
+    if (it.kind === 'gap') { y += it.height + seam; return }
     if (it.kind === 'rule') {
       const rx = canvasAlign === 'left' ? anchorX : canvasAlign === 'right' ? anchorX - it.width : anchorX - it.width / 2
       ctx.fillStyle = it.color
       ctx.fillRect(rx, y + it.height, it.width, it.height)
-      y += it.height + it.gapAfter
+      y += it.height + it.gapAfter + seam
       return
     }
     ctx.font = it.font
@@ -364,7 +440,7 @@ function renderStack(
       }
       ctx.fillText(ln, anchorX, y)
     })
-    y += it.gapAfter
+    y += it.gapAfter + seam
   })
 }
 
@@ -704,6 +780,12 @@ async function drawCard(
   const stackTop = contentTop + 30 * U
   const stackAreaH = contentHeight - footerBand - 30 * U
 
+  // User spacing preferences, applied to whatever sections are assembled — so any
+  // future section inherits them automatically (principle 2).
+  const lineK = LINE_SCALE[style.lineSpacing ?? 'normal']
+  const blockK = BLOCK_SCALE[style.blockSpacing ?? 'normal']
+  const vMode: VerticalMode = style.verticalMode ?? 'center'
+
   // Two-column arrangement (Phase 3): date block in the left column, the rest on
   // the right. Falls back to a single centered stack when off or too narrow.
   if (style.twoColumn && contentWidth > 700 * U && visible.includes('date')) {
@@ -712,15 +794,15 @@ async function drawCard(
     const rightW = contentWidth - leftW - colGap
     const leftX = contentLeft + leftW / 2
     const rightX = contentLeft + leftW + colGap + rightW / 2
-    const leftStack = buildSection('date')
+    const leftStack = applySpacing(buildSection('date'), lineK, blockK)
     const rightStack: StackItem[] = []
     for (const k of visible) { if (k !== 'date') rightStack.push(...buildSection(k)) }
-    renderStack(ctx, leftStack, leftX, 'center', stackTop, stackAreaH)
-    renderStack(ctx, rightStack, rightX, 'center', stackTop, stackAreaH)
+    renderStack(ctx, leftStack, leftX, 'center', stackTop, stackAreaH, vMode)
+    renderStack(ctx, applySpacing(rightStack, lineK, blockK), rightX, 'center', stackTop, stackAreaH, vMode)
   } else {
     const stack: StackItem[] = []
     for (const k of visible) stack.push(...buildSection(k))
-    renderStack(ctx, stack, anchorX, canvasAlign, stackTop, stackAreaH)
+    renderStack(ctx, applySpacing(stack, lineK, blockK), anchorX, canvasAlign, stackTop, stackAreaH, vMode)
   }
 
 
@@ -825,6 +907,9 @@ export function ScheduleCardGenerator({
       if (Array.isArray(L.sectionOrder) && L.sectionOrder.length) setSectionOrder(L.sectionOrder as SectionKey[])
       if (Array.isArray(L.hiddenSections)) setHiddenSections(L.hiddenSections as SectionKey[])
       if (typeof L.twoColumn === 'boolean') setTwoColumn(L.twoColumn)
+      if (L.lineSpacing === 'tight' || L.lineSpacing === 'normal' || L.lineSpacing === 'relaxed') setLineSpacing(L.lineSpacing)
+      if (L.blockSpacing === 'tight' || L.blockSpacing === 'normal' || L.blockSpacing === 'relaxed') setBlockSpacing(L.blockSpacing)
+      if (L.verticalMode === 'center' || L.verticalMode === 'spread') setVerticalMode(L.verticalMode)
     }
   }
 
@@ -838,7 +923,7 @@ export function ScheduleCardGenerator({
         textMode: textColorMode,
         textHex: textColorMode === 'custom' ? customTextHex : null,
         template, background,
-        layout: { dateFormat, dateLocale, showYear, sectionOrder, hiddenSections, twoColumn },
+        layout: { dateFormat, dateLocale, showYear, sectionOrder, hiddenSections, twoColumn, lineSpacing, blockSpacing, verticalMode },
       } })
       setThemeMsg(`Saved "${name}"`)
       setThemeName('')
@@ -864,6 +949,9 @@ export function ScheduleCardGenerator({
   const [sectionOrder, setSectionOrder] = useState<SectionKey[]>(DEFAULT_SECTION_ORDER)
   const [hiddenSections, setHiddenSections] = useState<SectionKey[]>([])
   const [twoColumn, setTwoColumn] = useState(false)
+  const [lineSpacing, setLineSpacing] = useState<Spacing>('normal')
+  const [blockSpacing, setBlockSpacing] = useState<Spacing>('normal')
+  const [verticalMode, setVerticalMode] = useState<VerticalMode>('center')
 
   const moveSection = (key: SectionKey, dir: -1 | 1) => {
     setSectionOrder((prev) => {
@@ -912,6 +1000,7 @@ export function ScheduleCardGenerator({
     background, titleSize, showQuote, showQR,
     dateFormat, dateLocale, showYear,
     sectionOrder, hiddenSections, twoColumn,
+    lineSpacing, blockSpacing, verticalMode,
   })
 
   const render = useCallback(() => {
@@ -923,7 +1012,8 @@ export function ScheduleCardGenerator({
     )
   }, [template, dimension, venue, date, startTime, endTime, quote, scheduleName, treatment, placement, sidePos,
       useCustomAccent, customAccentHex, font, align, textColorMode, customTextHex, showLogo, logoH, logoV,
-      footerText, background, titleSize, showQuote, showQR, dateFormat, dateLocale, showYear, sectionOrder, hiddenSections, twoColumn])
+      footerText, background, titleSize, showQuote, showQR, dateFormat, dateLocale, showYear, sectionOrder, hiddenSections, twoColumn,
+      lineSpacing, blockSpacing, verticalMode])
 
   useEffect(() => { render() }, [render])
 
@@ -984,14 +1074,55 @@ export function ScheduleCardGenerator({
   const SegBtn = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) => (
     <button onClick={onClick}
       className={`py-2 rounded-xl text-xs font-bold capitalize border transition-colors ${
-        active ? 'bg-blue-600 text-white border-blue-600'
-          : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:border-blue-500'
+        active ? 'tr-grad border-transparent shadow-sm'
+          : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))] hover:border-[rgb(var(--accent-500))]'
       }`}>
       {children}
     </button>
   )
 
   const previewMax = dimension === 'banner' ? 380 : dimension === 'story' ? 220 : 300
+
+  // Mini swatch per theme — mirrors each template's ACTUAL background formula in
+  // drawCard(), so the picker previews the real look instead of a guessed colour.
+  // Keep in sync if a template's base background changes.
+  const swatchFor = (t: Template): string => {
+    const a = `rgb(${useCustomAccent ? hexToRGBString(customAccentHex) : getLiveAccentRGB()})`
+    switch (t) {
+      case 'gradientPop': return `linear-gradient(135deg, ${a}, #111118)`
+      case 'nightCourt': return 'radial-gradient(circle at 50% 40%, #141b2e, #05070d)'
+      case 'retroBlock': return '#f4ede0'
+      case 'minimal': return '#ffffff'
+      default: return `linear-gradient(135deg, #17171c, ${a})` // bold / energetic: dark + accent
+    }
+  }
+
+  const TemplateChip = ({ t, label }: { t: Template; label: string }) => {
+    const active = template === t
+    return (
+      <button
+        onClick={() => setTemplate(t)}
+        title={label}
+        className={`group rounded-xl border p-1.5 text-left transition-colors ${
+          active
+            ? 'border-[rgb(var(--grad-from)/0.6)] tr-grad-ring'
+            : 'border-[rgb(var(--border-soft))] hover:border-[rgb(var(--accent-500))]'
+        }`}
+      >
+        <span
+          className="block h-9 w-full rounded-lg border border-black/10"
+          style={{ background: swatchFor(t) }}
+        />
+        <span
+          className={`mt-1 block text-[10px] font-bold text-center truncate ${
+            active ? 'text-[rgb(var(--fg))]' : 'text-[rgb(var(--muted-fg))]'
+          }`}
+        >
+          {label}
+        </span>
+      </button>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
@@ -1005,9 +1136,9 @@ export function ScheduleCardGenerator({
           <div className="flex flex-col items-center md:sticky md:top-20 self-start">
             <canvas ref={canvasRef} className="rounded-xl shadow-lg border border-[rgb(var(--border-soft))]" style={{ width: '100%', maxWidth: previewMax }} />
             <p className="text-[11px] text-[rgb(var(--muted-fg))] mt-2">{DIMENSIONS[dimension].w} × {DIMENSIONS[dimension].h}</p>
-            {fontLoading && <p className="text-[11px] text-blue-500 mt-1">Loading font…</p>}
+            {fontLoading && <p className="text-[11px] text-[rgb(var(--accent-600))] mt-1">Loading font…</p>}
             <button onClick={randomizeStyle}
-              className="mt-3 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border border-[rgb(var(--border-soft))] hover:border-blue-500 transition-colors">
+              className="mt-3 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border border-[rgb(var(--border-soft))] hover:border-[rgb(var(--accent-500))] transition-colors">
               <Shuffle size={13} /> Randomize Style
             </button>
           </div>
@@ -1026,7 +1157,7 @@ export function ScheduleCardGenerator({
               <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Theme</label>
               <div className="grid grid-cols-3 gap-2">
                 {THEMES.map((t) => (
-                  <SegBtn key={t.value} active={template === t.value} onClick={() => setTemplate(t.value)}>{t.label}</SegBtn>
+                  <TemplateChip key={t.value} t={t.value} label={t.label} />
                 ))}
               </div>
             </div>
@@ -1036,13 +1167,13 @@ export function ScheduleCardGenerator({
               {photoUrl ? (
                 <div className="flex items-center gap-2">
                   <img src={photoUrl} alt="" className="w-12 h-12 rounded-lg object-cover border border-[rgb(var(--border-soft))]" />
-                  <button onClick={handleUploadClick} className="text-xs px-3 py-2 rounded-lg border border-[rgb(var(--border-soft))] hover:border-blue-500 transition-colors">Change</button>
+                  <button onClick={handleUploadClick} className="text-xs px-3 py-2 rounded-lg border border-[rgb(var(--border-soft))] hover:border-[rgb(var(--accent-500))] transition-colors">Change</button>
                   <button onClick={() => setPhotoUrl(null)} className="p-2 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"><Trash2 size={14} /></button>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
-                  <button onClick={handleUploadClick} className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold border border-dashed border-[rgb(var(--border-strong))] text-[rgb(var(--muted-fg))] hover:border-blue-500 hover:text-blue-500 transition-colors"><Upload size={14} /> Upload</button>
-                  <button onClick={openGalleryPicker} className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold border border-dashed border-[rgb(var(--border-strong))] text-[rgb(var(--muted-fg))] hover:border-blue-500 hover:text-blue-500 transition-colors"><Images size={14} /> From Gallery</button>
+                  <button onClick={handleUploadClick} className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold border border-dashed border-[rgb(var(--border-strong))] text-[rgb(var(--muted-fg))] hover:border-[rgb(var(--accent-500))] hover:text-[rgb(var(--accent-600))] transition-colors"><Upload size={14} /> Upload</button>
+                  <button onClick={openGalleryPicker} className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold border border-dashed border-[rgb(var(--border-strong))] text-[rgb(var(--muted-fg))] hover:border-[rgb(var(--accent-500))] hover:text-[rgb(var(--accent-600))] transition-colors"><Images size={14} /> From Gallery</button>
                 </div>
               )}
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
@@ -1111,6 +1242,35 @@ export function ScheduleCardGenerator({
               </div>
 
               <div className="mb-4">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Line spacing</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['tight', 'normal', 'relaxed'] as Spacing[]).map((v) => (
+                    <SegBtn key={v} active={lineSpacing === v} onClick={() => setLineSpacing(v)}>{v}</SegBtn>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Section spacing</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['tight', 'normal', 'relaxed'] as Spacing[]).map((v) => (
+                    <SegBtn key={v} active={blockSpacing === v} onClick={() => setBlockSpacing(v)}>{v}</SegBtn>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Vertical fit</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <SegBtn active={verticalMode === 'center'} onClick={() => setVerticalMode('center')}>Centered</SegBtn>
+                  <SegBtn active={verticalMode === 'spread'} onClick={() => setVerticalMode('spread')}>Spread</SegBtn>
+                </div>
+                <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1">
+                  <span className="font-bold">Spread</span> pushes the spare space between blocks so the card fills top-to-bottom instead of bunching in the middle. Text that would overflow is auto-fitted.
+                </p>
+              </div>
+
+              <div className="mb-4">
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Sections (reorder / hide)</label>
                   <SegBtn active={twoColumn} onClick={() => setTwoColumn(!twoColumn)}>2-Column</SegBtn>
@@ -1140,14 +1300,14 @@ export function ScheduleCardGenerator({
               <div className="mb-4">
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Accent Color</label>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setUseCustomAccent(false)} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${!useCustomAccent ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Site Theme</button>
-                  <button onClick={() => setUseCustomAccent(true)} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${useCustomAccent ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Custom</button>
+                  <button onClick={() => setUseCustomAccent(false)} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${!useCustomAccent ? 'tr-grad border-transparent shadow-sm' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Site Theme</button>
+                  <button onClick={() => setUseCustomAccent(true)} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${useCustomAccent ? 'tr-grad border-transparent shadow-sm' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Custom</button>
                   {useCustomAccent && <input type="color" value={customAccentHex} onChange={(e) => setCustomAccentHex(e.target.value)} className="w-10 h-9 rounded-lg border border-[rgb(var(--border-soft))] cursor-pointer" />}
                 </div>
                 {hasCommunityPalette && (
                   <button
                     onClick={() => { setUseCustomAccent(true); setCustomAccentHex(communityPrimary!); if (communitySecondary) { setTextColorMode('custom'); setCustomTextHex(communitySecondary) } }}
-                    className="mt-2 w-full py-1.5 rounded-lg text-[11px] font-bold border border-[rgb(var(--border-soft))] hover:border-blue-500 flex items-center justify-center gap-1.5">
+                    className="mt-2 w-full py-1.5 rounded-lg text-[11px] font-bold border border-[rgb(var(--border-soft))] hover:border-[rgb(var(--accent-500))] flex items-center justify-center gap-1.5">
                     <span className="inline-block w-3 h-3 rounded-full" style={{ background: communityPrimary! }} />
                     Reset to community palette
                   </button>
@@ -1173,8 +1333,8 @@ export function ScheduleCardGenerator({
                   )}
                   <div className="flex items-center gap-1.5">
                     <input value={themeName} onChange={(e) => setThemeName(e.target.value)} placeholder="Name this theme…"
-                      className="flex-1 text-[11px] rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-2 py-1.5 focus:outline-none focus:border-blue-500" />
-                    <button onClick={handleSaveTheme} className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Save</button>
+                      className="flex-1 text-[11px] rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-2 py-1.5 focus:outline-none focus:border-[rgb(var(--accent-500))]" />
+                    <button onClick={handleSaveTheme} className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg tr-grad hover:opacity-95">Save</button>
                   </div>
                   {themeMsg && <p className="text-[10px] text-[rgb(var(--muted-fg))] mt-1">{themeMsg}</p>}
                 </div>
@@ -1182,7 +1342,7 @@ export function ScheduleCardGenerator({
 
               <div className="mb-4">
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Font Style</label>
-                <select value={font} onChange={(e) => setFont(e.target.value as FontChoice)} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500">
+                <select value={font} onChange={(e) => setFont(e.target.value as FontChoice)} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-[rgb(var(--accent-500))]">
                   {FONT_OPTIONS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                 </select>
               </div>
@@ -1199,8 +1359,8 @@ export function ScheduleCardGenerator({
               <div className="mb-4">
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-2">Text Color</label>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setTextColorMode('auto')} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${textColorMode === 'auto' ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Auto</button>
-                  <button onClick={() => setTextColorMode('custom')} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${textColorMode === 'custom' ? 'bg-blue-600 text-white border-blue-600' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Custom</button>
+                  <button onClick={() => setTextColorMode('auto')} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${textColorMode === 'auto' ? 'tr-grad border-transparent shadow-sm' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Auto</button>
+                  <button onClick={() => setTextColorMode('custom')} className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors ${textColorMode === 'custom' ? 'tr-grad border-transparent shadow-sm' : 'bg-[rgb(var(--bg))] border-[rgb(var(--border-soft))] text-[rgb(var(--muted-fg))]'}`}>Custom</button>
                   {textColorMode === 'custom' && <input type="color" value={customTextHex} onChange={(e) => setCustomTextHex(e.target.value)} className="w-10 h-9 rounded-lg border border-[rgb(var(--border-soft))] cursor-pointer" />}
                 </div>
               </div>
@@ -1217,21 +1377,21 @@ export function ScheduleCardGenerator({
 
               <div className="mb-4 flex items-center justify-between">
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Show Quote</label>
-                <button onClick={() => setShowQuote(!showQuote)} className={`w-11 h-6 rounded-full transition-colors relative ${showQuote ? 'bg-blue-600' : 'bg-[rgb(var(--border-soft))]'}`}>
+                <button onClick={() => setShowQuote(!showQuote)} className={`w-11 h-6 rounded-full transition-colors relative ${showQuote ? 'tr-grad' : 'bg-[rgb(var(--border-soft))]'}`}>
                   <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${showQuote ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
 
               <div className="mb-4 flex items-center justify-between">
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Show QR (Scan to Register)</label>
-                <button onClick={() => setShowQR(!showQR)} className={`w-11 h-6 rounded-full transition-colors relative ${showQR ? 'bg-blue-600' : 'bg-[rgb(var(--border-soft))]'}`}>
+                <button onClick={() => setShowQR(!showQR)} className={`w-11 h-6 rounded-full transition-colors relative ${showQR ? 'tr-grad' : 'bg-[rgb(var(--border-soft))]'}`}>
                   <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${showQR ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
 
               <div className="mb-4 flex items-center justify-between">
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))]">Show Club Logo</label>
-                <button onClick={() => setShowLogo(!showLogo)} className={`w-11 h-6 rounded-full transition-colors relative ${showLogo ? 'bg-blue-600' : 'bg-[rgb(var(--border-soft))]'}`}>
+                <button onClick={() => setShowLogo(!showLogo)} className={`w-11 h-6 rounded-full transition-colors relative ${showLogo ? 'tr-grad' : 'bg-[rgb(var(--border-soft))]'}`}>
                   <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${showLogo ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
@@ -1259,43 +1419,43 @@ export function ScheduleCardGenerator({
 
               <div>
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Footer Text</label>
-                <input value={footerText} onChange={(e) => setFooterText(e.target.value)} placeholder="The Rebels Volleyball" className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+                <input value={footerText} onChange={(e) => setFooterText(e.target.value)} placeholder="The Rebels Volleyball" className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-[rgb(var(--accent-500))]" />
               </div>
             </div>
 
             <div className="border-t border-[rgb(var(--border-soft))] pt-4 space-y-4">
               <div>
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Venue</label>
-                <input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="e.g. Rebels Sports Complex" className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+                <input value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="e.g. Rebels Sports Complex" className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-[rgb(var(--accent-500))]" />
               </div>
               <div>
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Date</label>
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-[rgb(var(--accent-500))]" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">Start Time</label>
-                  <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+                  <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-[rgb(var(--accent-500))]" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1">End Time</label>
-                  <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-blue-500" />
+                  <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 focus:outline-none focus:border-[rgb(var(--accent-500))]" />
                 </div>
               </div>
               <div>
                 <label className="text-xs font-bold text-[rgb(var(--muted-fg))] block mb-1 flex items-center justify-between">
                   <span>Quote</span>
-                  <button onClick={() => setQuote(randomQuote())} className="text-blue-500 flex items-center gap-1 text-[11px] font-semibold hover:underline"><Sparkles size={11} /> Shuffle</button>
+                  <button onClick={() => setQuote(randomQuote())} className="text-[rgb(var(--accent-600))] flex items-center gap-1 text-[11px] font-semibold hover:underline"><Sparkles size={11} /> Shuffle</button>
                 </label>
-                <textarea value={quote} onChange={(e) => setQuote(e.target.value)} rows={2} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 resize-none focus:outline-none focus:border-blue-500" />
+                <textarea value={quote} onChange={(e) => setQuote(e.target.value)} rows={2} className="w-full text-sm rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--bg))] px-3 py-2 resize-none focus:outline-none focus:border-[rgb(var(--accent-500))]" />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => handleDownload(false)} disabled={generating} className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-sm font-bold transition-colors disabled:opacity-50">
+              <button onClick={() => handleDownload(false)} disabled={generating} className="flex items-center justify-center gap-2 tr-grad hover:opacity-95 rounded-xl py-3 text-sm font-bold transition-colors disabled:opacity-50 shadow-sm">
                 <Download size={16} /> {generating ? 'Working…' : 'Download JPG'}
               </button>
-              <button onClick={() => handleDownload(true)} disabled={generating} className="flex items-center justify-center gap-2 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] hover:border-blue-500 rounded-xl py-3 text-sm font-bold transition-colors disabled:opacity-50">
+              <button onClick={() => handleDownload(true)} disabled={generating} className="flex items-center justify-center gap-2 bg-[rgb(var(--bg))] border border-[rgb(var(--border-soft))] hover:border-[rgb(var(--accent-500))] rounded-xl py-3 text-sm font-bold transition-colors disabled:opacity-50">
                 <Download size={16} /> 2× Quality
               </button>
             </div>
@@ -1318,7 +1478,7 @@ export function ScheduleCardGenerator({
               ) : (
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                   {galleryImages.map((img) => (
-                    <button key={img.id} onClick={() => { setPhotoUrl(img.url); setShowGalleryPicker(false) }} className="aspect-square rounded-xl overflow-hidden border border-[rgb(var(--border-soft))] hover:border-blue-500 transition-colors">
+                    <button key={img.id} onClick={() => { setPhotoUrl(img.url); setShowGalleryPicker(false) }} className="aspect-square rounded-xl overflow-hidden border border-[rgb(var(--border-soft))] hover:border-[rgb(var(--accent-500))] transition-colors">
                       <img src={img.url} alt={img.alt} className="w-full h-full object-cover" />
                     </button>
                   ))}
